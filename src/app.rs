@@ -282,11 +282,21 @@ impl CreateDialog {
         }
     }
 
-    pub fn field_count(&self) -> usize {
+    pub fn form_field_count(&self) -> usize {
         match self.tab {
             DialogTab::Basic => 7,    // name image cpus memory ports env_vars workdir
             DialogTab::Advanced => 6, // hostname user shell max_cpus max_memory no_net
         }
+    }
+
+    /// Total navigable positions: form fields + the Create button.
+    pub fn field_count(&self) -> usize {
+        self.form_field_count() + 1
+    }
+
+    /// True when the Create button is focused (last navigable position).
+    pub fn is_create_focused(&self) -> bool {
+        self.field == self.form_field_count()
     }
 
     pub fn next_field(&mut self) {
@@ -319,7 +329,7 @@ impl CreateDialog {
                 3 => Some(&mut self.memory),
                 4 => None, // ports — managed via sub-dialog
                 5 => None, // env_vars — managed via sub-dialog
-                6 => Some(&mut self.workdir),
+                6 => None, // workdir — managed via dir picker
                 _ => None,
             },
             DialogTab::Advanced => match self.field {
@@ -336,6 +346,9 @@ impl CreateDialog {
 
     /// True when the focused field only accepts ASCII digits.
     pub fn is_numeric_field(&self) -> bool {
+        if self.is_create_focused() {
+            return false;
+        }
         match self.tab {
             DialogTab::Basic => matches!(self.field, 2 | 3),
             DialogTab::Advanced => matches!(self.field, 3 | 4),
@@ -344,7 +357,7 @@ impl CreateDialog {
 
     /// True when the focused field is a boolean toggle activated by Space.
     pub fn is_toggle_field(&self) -> bool {
-        self.tab == DialogTab::Advanced && self.field == 5
+        !self.is_create_focused() && self.tab == DialogTab::Advanced && self.field == 5
     }
 }
 
@@ -781,7 +794,7 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
     }
 }
 
-fn handle_dialog_key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
+fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
     match code {
         KeyCode::Esc => {
             app.create_dialog = Default::default();
@@ -802,14 +815,22 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
         }
         KeyCode::Enter => {
             let dlg = &app.create_dialog;
-            if dlg.tab == DialogTab::Basic && dlg.field == 4 {
+            if dlg.is_create_focused() {
+                submit_create_dialog(app);
+            } else if dlg.tab == DialogTab::Basic && dlg.field == 4 {
                 let entries = app.create_dialog.ports.clone();
                 app.create_dialog.ports_dialog = PortsDialog::open(entries);
             } else if dlg.tab == DialogTab::Basic && dlg.field == 5 {
                 let entries = app.create_dialog.env_vars.clone();
                 app.create_dialog.env_vars_dialog = EnvVarsDialog::open(entries);
-            } else {
-                submit_create_dialog(app);
+            } else if dlg.tab == DialogTab::Basic && dlg.field == 6 {
+                let initial = app.create_dialog.workdir.trim().to_owned();
+                let start = if initial.is_empty() { "/" } else { &initial };
+                app.create_dialog.dir_picker = DirPicker::open(start);
+            }
+            // Enter on plain text fields moves to next field.
+            else {
+                app.create_dialog.next_field();
             }
         }
         KeyCode::Backspace => {
@@ -818,23 +839,13 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
             }
             app.create_dialog.error = None;
         }
-        // Ctrl+F on the workdir field opens the directory picker.
-        KeyCode::Char('f') | KeyCode::Char('F')
-            if mods.contains(KeyModifiers::CONTROL)
-                && app.create_dialog.tab == DialogTab::Basic
-                && app.create_dialog.field == 6 =>
-        {
-            let initial = app.create_dialog.workdir.trim().to_owned();
-            let start = if initial.is_empty() { "/" } else { initial.as_str() };
-            app.create_dialog.dir_picker = DirPicker::open(start);
-        }
         KeyCode::Char(c) => {
-            if app.create_dialog.is_toggle_field() {
+            if app.create_dialog.is_toggle_field() || app.create_dialog.is_create_focused() {
                 return;
             }
-            // Ports and env vars are managed via sub-dialogs; ignore text input.
+            // Managed fields (ports, env vars, workdir) don't accept direct text input.
             if app.create_dialog.tab == DialogTab::Basic
-                && matches!(app.create_dialog.field, 4 | 5)
+                && matches!(app.create_dialog.field, 4 | 5 | 6)
             {
                 return;
             }

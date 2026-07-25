@@ -34,10 +34,12 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
+    // Layout: tab bar + separator + form fields + Create button + hint/error
+    let form_fields = dlg.form_field_count();
     let mut constraints = vec![Constraint::Length(1), Constraint::Length(1)];
-    constraints.extend(std::iter::repeat(Constraint::Length(3)).take(dlg.field_count()));
-    constraints.push(Constraint::Length(1));
-    constraints.push(Constraint::Length(1));
+    constraints.extend(std::iter::repeat(Constraint::Length(3)).take(form_fields));
+    constraints.push(Constraint::Length(1)); // Create button
+    constraints.push(Constraint::Length(1)); // hint / error
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -50,13 +52,15 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         DialogTab::Basic => {
             let ports_summary = format_ports_summary(&dlg.ports);
             let env_summary = format_env_vars_summary(&dlg.env_vars);
+            let workdir_summary =
+                if dlg.workdir.is_empty() { "(none)".into() } else { dlg.workdir.clone() };
             render_field(f, "Name    ", &dlg.name, dlg.field == 0, chunks[2]);
             render_field(f, "Image   ", &dlg.image, dlg.field == 1, chunks[3]);
             render_field(f, "CPUs    ", &dlg.cpus, dlg.field == 2, chunks[4]);
             render_field(f, "Memory  ", &dlg.memory, dlg.field == 3, chunks[5]);
             render_managed_field(f, "Ports   ", &ports_summary, dlg.field == 4, chunks[6]);
             render_managed_field(f, "Env Vars", &env_summary, dlg.field == 5, chunks[7]);
-            render_field(f, "Workdir ", &dlg.workdir, dlg.field == 6, chunks[8]);
+            render_managed_field_with_hint(f, "Workdir ", &workdir_summary, "browse", dlg.field == 6, chunks[8]);
         }
         DialogTab::Advanced => {
             render_field(f, "Hostname", &dlg.hostname, dlg.field == 0, chunks[2]);
@@ -68,18 +72,27 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let message_chunk = chunks[2 + dlg.field_count() + 1];
-    let hint = match (dlg.tab, dlg.field) {
-        (DialogTab::Basic, 6) => {
-            "Tab/↑↓ field   ◄► tab   Ctrl+F browse   Enter create   Esc cancel"
+    // Create button — always at chunks[2 + form_field_count]
+    let create_chunk = chunks[2 + form_fields];
+    render_create_button(f, dlg.is_create_focused(), create_chunk);
+
+    // Hint / error — always at chunks[2 + form_field_count + 1]
+    let message_chunk = chunks[2 + form_fields + 1];
+    let hint = if dlg.is_create_focused() {
+        "Enter create sandbox   Esc cancel"
+    } else {
+        match (dlg.tab, dlg.field) {
+            (DialogTab::Basic, 4) | (DialogTab::Basic, 5) => {
+                "Tab/↑↓ navigate   ◄► tab   Enter manage   Esc cancel"
+            }
+            (DialogTab::Basic, 6) => {
+                "Tab/↑↓ navigate   ◄► tab   Enter browse   Esc cancel"
+            }
+            (DialogTab::Advanced, 5) => {
+                "Tab/↑↓ navigate   ◄► tab   Space toggle   Esc cancel"
+            }
+            _ => "Tab/↑↓ navigate   ◄► tab   Esc cancel",
         }
-        (DialogTab::Basic, 4) | (DialogTab::Basic, 5) => {
-            "Tab/↑↓ field   ◄► tab   Enter manage   Esc cancel"
-        }
-        (DialogTab::Advanced, 5) => {
-            "Tab/↑↓ field   ◄► tab   Space toggle   Enter create   Esc cancel"
-        }
-        _ => "Tab/↑↓ field   ◄► tab   Enter create   Esc cancel",
     };
     if let Some(ref err) = dlg.error {
         f.render_widget(
@@ -225,6 +238,27 @@ fn render_toggle(f: &mut Frame, label: &str, value: bool, focused: bool, area: R
     );
 }
 
+/// Render the Create Sandbox button at the bottom of the form.
+fn render_create_button(f: &mut Frame, focused: bool, area: Rect) {
+    let (label, style) = if focused {
+        (
+            "[ ✚ Create Sandbox ]",
+            Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )
+    } else {
+        (
+            "[ ✚ Create Sandbox ]",
+            Style::default().fg(Color::DarkGray),
+        )
+    };
+
+    // Centre the label within the available area.
+    let label_len = label.chars().count() as u16;
+    let x = area.x + area.width.saturating_sub(label_len) / 2;
+    let btn_area = Rect::new(x, area.y, label_len.min(area.width), 1);
+    f.render_widget(Paragraph::new(Span::styled(label, style)), btn_area);
+}
+
 /// Format a list of port mappings as a compact summary string.
 fn format_ports_summary(ports: &[(u16, u16)]) -> String {
     if ports.is_empty() {
@@ -243,9 +277,26 @@ fn format_env_vars_summary(vars: &[(String, String)]) -> String {
     }
 }
 
-/// Render a read-only field whose value is managed via a sub-dialog.
-/// Shows a summary of current entries and a `[↵ manage]` indicator when focused.
-fn render_managed_field(f: &mut Frame, label: &str, summary: &str, focused: bool, area: Rect) {
+/// Render a read-only field whose value is managed via a sub-dialog or picker.
+/// `action_hint` is shown when focused, e.g. `"manage"` or `"browse"`.
+fn render_managed_field(
+    f: &mut Frame,
+    label: &str,
+    summary: &str,
+    focused: bool,
+    area: Rect,
+) {
+    render_managed_field_with_hint(f, label, summary, "manage", focused, area);
+}
+
+fn render_managed_field_with_hint(
+    f: &mut Frame,
+    label: &str,
+    summary: &str,
+    action_hint: &str,
+    focused: bool,
+    area: Rect,
+) {
     let border_color = if focused { Color::Cyan } else { Color::DarkGray };
     let label_color = if focused { Color::White } else { Color::DarkGray };
 
@@ -269,7 +320,7 @@ fn render_managed_field(f: &mut Frame, label: &str, summary: &str, focused: bool
     );
 
     let (text, color) = if focused {
-        let indicator = "  [↵ manage]";
+        let indicator = format!("  [↵ {action_hint}]");
         let max_summary = (inner.width as usize).saturating_sub(indicator.len() + 1);
         let truncated = if summary.len() > max_summary {
             format!("{}…", &summary[..max_summary.saturating_sub(1)])
