@@ -180,6 +180,64 @@ pub fn load_dir_entries(path: &str) -> Vec<String> {
     entries
 }
 
+/// Mode for the ports / env-vars sub-dialogs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SubDialogMode {
+    #[default]
+    List,
+    Add,
+}
+
+/// Sub-dialog for managing port mappings (host:guest).
+#[derive(Debug, Clone, Default)]
+pub struct PortsDialog {
+    pub visible: bool,
+    /// Confirmed mappings (host_port, guest_port).
+    pub entries: Vec<(u16, u16)>,
+    /// Selected entry index (List mode).
+    pub selected: usize,
+    pub mode: SubDialogMode,
+    /// Host-port input buffer (Add mode).
+    pub host_input: String,
+    /// Guest-port input buffer (Add mode).
+    pub guest_input: String,
+    /// Focused input index in Add mode: 0 = host, 1 = guest.
+    pub add_field: usize,
+    pub error: Option<String>,
+}
+
+impl PortsDialog {
+    pub fn open(entries: Vec<(u16, u16)>) -> Self {
+        let selected = entries.len().saturating_sub(1);
+        Self { visible: true, entries, selected, ..Default::default() }
+    }
+}
+
+/// Sub-dialog for managing environment variables (KEY=VALUE).
+#[derive(Debug, Clone, Default)]
+pub struct EnvVarsDialog {
+    pub visible: bool,
+    /// Confirmed variables (key, value).
+    pub entries: Vec<(String, String)>,
+    /// Selected entry index (List mode).
+    pub selected: usize,
+    pub mode: SubDialogMode,
+    /// Key input buffer (Add mode).
+    pub key_input: String,
+    /// Value input buffer (Add mode).
+    pub value_input: String,
+    /// Focused input index in Add mode: 0 = key, 1 = value.
+    pub add_field: usize,
+    pub error: Option<String>,
+}
+
+impl EnvVarsDialog {
+    pub fn open(entries: Vec<(String, String)>) -> Self {
+        let selected = entries.len().saturating_sub(1);
+        Self { visible: true, entries, selected, ..Default::default() }
+    }
+}
+
 /// State of the "create new sandbox" modal dialog.
 #[derive(Debug, Clone, Default)]
 pub struct CreateDialog {
@@ -191,8 +249,10 @@ pub struct CreateDialog {
     pub image: String,
     pub cpus: String,
     pub memory: String,
-    pub ports: String,
-    pub env_vars: String,
+    /// Port mappings (host, guest) managed via [`PortsDialog`].
+    pub ports: Vec<(u16, u16)>,
+    /// Environment variables (key, value) managed via [`EnvVarsDialog`].
+    pub env_vars: Vec<(String, String)>,
     pub workdir: String,
     // Advanced tab (fields 0-5)
     pub hostname: String,
@@ -204,9 +264,10 @@ pub struct CreateDialog {
     pub error: Option<String>,
     /// Inline directory browser for picking the workdir path.
     pub dir_picker: DirPicker,
-    /// Absorb the next ESC event in the dialog (set when the picker was just
-    /// closed by ESC so the release doesn't also close the dialog).
-    pub absorb_esc: bool,
+    /// Sub-dialog for managing port mappings.
+    pub ports_dialog: PortsDialog,
+    /// Sub-dialog for managing environment variables.
+    pub env_vars_dialog: EnvVarsDialog,
 }
 
 impl CreateDialog {
@@ -248,7 +309,7 @@ impl CreateDialog {
     }
 
     /// Returns a mutable reference to the text value of the focused field,
-    /// or `None` when the focused field is a non-text widget (e.g. a toggle).
+    /// or `None` when the focused field is a non-text widget (toggle or sub-dialog).
     pub fn current_field_mut(&mut self) -> Option<&mut String> {
         match self.tab {
             DialogTab::Basic => match self.field {
@@ -256,8 +317,8 @@ impl CreateDialog {
                 1 => Some(&mut self.image),
                 2 => Some(&mut self.cpus),
                 3 => Some(&mut self.memory),
-                4 => Some(&mut self.ports),
-                5 => Some(&mut self.env_vars),
+                4 => None, // ports — managed via sub-dialog
+                5 => None, // env_vars — managed via sub-dialog
                 6 => Some(&mut self.workdir),
                 _ => None,
             },
@@ -614,12 +675,10 @@ pub async fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> 
 pub(crate) fn handle_event(app: &mut App, event: Event) {
     let Event::Key(key) = event else { return };
 
-    // Only act on key presses or repeats; skip releases from enhanced terminals.
-    // Exception: Esc is also accepted on release so that terminals which report
-    // it only as a release event (kitty keyboard protocol, etc.) still close the
-    // dialog reliably.
-    let is_esc = key.code == KeyCode::Esc;
-    if key.kind == KeyEventKind::Release && !is_esc {
+    // Only act on key presses or repeats; ignore all release events.
+    // This ensures every physical keypress is handled exactly once,
+    // regardless of how many events the terminal emits per keystroke.
+    if key.kind == KeyEventKind::Release {
         return;
     }
 
@@ -627,6 +686,10 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
     if app.create_dialog.visible {
         if app.create_dialog.dir_picker.visible {
             handle_picker_key(app, key.code, key.modifiers);
+        } else if app.create_dialog.ports_dialog.visible {
+            handle_ports_dialog_key(app, key.code, key.modifiers);
+        } else if app.create_dialog.env_vars_dialog.visible {
+            handle_env_vars_dialog_key(app, key.code, key.modifiers);
         } else {
             handle_dialog_key(app, key.code, key.modifiers);
         }
@@ -721,13 +784,6 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
 fn handle_dialog_key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
     match code {
         KeyCode::Esc => {
-            // A preceding ESC that closed the dir picker sets absorb_esc so that
-            // the ESC Release event (sent by standard terminals after the Press)
-            // doesn't also close the create dialog.
-            if app.create_dialog.absorb_esc {
-                app.create_dialog.absorb_esc = false;
-                return;
-            }
             app.create_dialog = Default::default();
         }
         KeyCode::Tab | KeyCode::Down => app.create_dialog.next_field(),
@@ -745,7 +801,16 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
             app.create_dialog.error = None;
         }
         KeyCode::Enter => {
-            submit_create_dialog(app);
+            let dlg = &app.create_dialog;
+            if dlg.tab == DialogTab::Basic && dlg.field == 4 {
+                let entries = app.create_dialog.ports.clone();
+                app.create_dialog.ports_dialog = PortsDialog::open(entries);
+            } else if dlg.tab == DialogTab::Basic && dlg.field == 5 {
+                let entries = app.create_dialog.env_vars.clone();
+                app.create_dialog.env_vars_dialog = EnvVarsDialog::open(entries);
+            } else {
+                submit_create_dialog(app);
+            }
         }
         KeyCode::Backspace => {
             if let Some(field) = app.create_dialog.current_field_mut() {
@@ -767,6 +832,12 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
             if app.create_dialog.is_toggle_field() {
                 return;
             }
+            // Ports and env vars are managed via sub-dialogs; ignore text input.
+            if app.create_dialog.tab == DialogTab::Basic
+                && matches!(app.create_dialog.field, 4 | 5)
+            {
+                return;
+            }
             if app.create_dialog.is_numeric_field() && !c.is_ascii_digit() {
                 app.create_dialog.error = Some("Only digits allowed here".into());
                 return;
@@ -784,13 +855,8 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
 pub const PICKER_VISIBLE_ROWS: usize = 10;
 
 fn handle_picker_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
-    // Handle ESC before taking a borrow on dir_picker so we can also set
-    // absorb_esc on the parent dialog to prevent the ESC Release event
-    // (which standard terminals send after the Press) from also closing
-    // the create dialog.
     if code == KeyCode::Esc {
         app.create_dialog.dir_picker.visible = false;
-        app.create_dialog.absorb_esc = true;
         return;
     }
 
@@ -866,6 +932,209 @@ fn handle_picker_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
     }
 }
 
+fn handle_ports_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+    match app.create_dialog.ports_dialog.mode {
+        SubDialogMode::List => {
+            match code {
+                KeyCode::Esc | KeyCode::Enter => {
+                    // Sync confirmed entries back to the parent field and close.
+                    let entries = app.create_dialog.ports_dialog.entries.clone();
+                    app.create_dialog.ports = entries;
+                    app.create_dialog.ports_dialog.visible = false;
+                }
+                KeyCode::Up => {
+                    if app.create_dialog.ports_dialog.selected > 0 {
+                        app.create_dialog.ports_dialog.selected -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    let len = app.create_dialog.ports_dialog.entries.len();
+                    if len > 0 && app.create_dialog.ports_dialog.selected + 1 < len {
+                        app.create_dialog.ports_dialog.selected += 1;
+                    }
+                }
+                KeyCode::Char('a') | KeyCode::Char('A') => {
+                    app.create_dialog.ports_dialog.mode = SubDialogMode::Add;
+                    app.create_dialog.ports_dialog.host_input.clear();
+                    app.create_dialog.ports_dialog.guest_input.clear();
+                    app.create_dialog.ports_dialog.add_field = 0;
+                    app.create_dialog.ports_dialog.error = None;
+                }
+                KeyCode::Char('d') | KeyCode::Delete => {
+                    let dialog = &mut app.create_dialog.ports_dialog;
+                    if !dialog.entries.is_empty() {
+                        dialog.entries.remove(dialog.selected);
+                        if dialog.selected >= dialog.entries.len() && dialog.selected > 0 {
+                            dialog.selected -= 1;
+                        }
+                        dialog.error = None;
+                    }
+                }
+                _ => {}
+            }
+        }
+        SubDialogMode::Add => match code {
+            KeyCode::Esc => {
+                app.create_dialog.ports_dialog.mode = SubDialogMode::List;
+                app.create_dialog.ports_dialog.error = None;
+            }
+            KeyCode::Tab | KeyCode::Down => {
+                let f = app.create_dialog.ports_dialog.add_field;
+                app.create_dialog.ports_dialog.add_field = (f + 1) % 2;
+            }
+            KeyCode::BackTab | KeyCode::Up => {
+                let f = app.create_dialog.ports_dialog.add_field;
+                app.create_dialog.ports_dialog.add_field = (f + 1) % 2;
+            }
+            KeyCode::Backspace => {
+                let dialog = &mut app.create_dialog.ports_dialog;
+                if dialog.add_field == 0 {
+                    dialog.host_input.pop();
+                } else {
+                    dialog.guest_input.pop();
+                }
+                dialog.error = None;
+            }
+            KeyCode::Enter => {
+                let dialog = &mut app.create_dialog.ports_dialog;
+                if dialog.add_field == 0 {
+                    // Move focus to the guest port field.
+                    dialog.add_field = 1;
+                } else {
+                    let host = dialog.host_input.trim().parse::<u16>();
+                    let guest = dialog.guest_input.trim().parse::<u16>();
+                    match (host, guest) {
+                        (Ok(h), Ok(g)) => {
+                            dialog.entries.push((h, g));
+                            dialog.selected = dialog.entries.len().saturating_sub(1);
+                            dialog.mode = SubDialogMode::List;
+                            dialog.error = None;
+                        }
+                        (Err(_), _) => {
+                            dialog.error = Some("Invalid host port (0–65535)".into());
+                        }
+                        (_, Err(_)) => {
+                            dialog.error = Some("Invalid guest port (0–65535)".into());
+                        }
+                    }
+                }
+            }
+            KeyCode::Char(c) if c.is_ascii_digit() => {
+                let dialog = &mut app.create_dialog.ports_dialog;
+                if dialog.add_field == 0 {
+                    dialog.host_input.push(c);
+                } else {
+                    dialog.guest_input.push(c);
+                }
+                dialog.error = None;
+            }
+            _ => {}
+        },
+    }
+}
+
+fn handle_env_vars_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+    match app.create_dialog.env_vars_dialog.mode {
+        SubDialogMode::List => {
+            match code {
+                KeyCode::Esc | KeyCode::Enter => {
+                    // Sync confirmed entries back to the parent field and close.
+                    let entries = app.create_dialog.env_vars_dialog.entries.clone();
+                    app.create_dialog.env_vars = entries;
+                    app.create_dialog.env_vars_dialog.visible = false;
+                }
+                KeyCode::Up => {
+                    if app.create_dialog.env_vars_dialog.selected > 0 {
+                        app.create_dialog.env_vars_dialog.selected -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    let len = app.create_dialog.env_vars_dialog.entries.len();
+                    if len > 0 && app.create_dialog.env_vars_dialog.selected + 1 < len {
+                        app.create_dialog.env_vars_dialog.selected += 1;
+                    }
+                }
+                KeyCode::Char('a') | KeyCode::Char('A') => {
+                    app.create_dialog.env_vars_dialog.mode = SubDialogMode::Add;
+                    app.create_dialog.env_vars_dialog.key_input.clear();
+                    app.create_dialog.env_vars_dialog.value_input.clear();
+                    app.create_dialog.env_vars_dialog.add_field = 0;
+                    app.create_dialog.env_vars_dialog.error = None;
+                }
+                KeyCode::Char('d') | KeyCode::Delete => {
+                    let dialog = &mut app.create_dialog.env_vars_dialog;
+                    if !dialog.entries.is_empty() {
+                        dialog.entries.remove(dialog.selected);
+                        if dialog.selected >= dialog.entries.len() && dialog.selected > 0 {
+                            dialog.selected -= 1;
+                        }
+                        dialog.error = None;
+                    }
+                }
+                _ => {}
+            }
+        }
+        SubDialogMode::Add => match code {
+            KeyCode::Esc => {
+                app.create_dialog.env_vars_dialog.mode = SubDialogMode::List;
+                app.create_dialog.env_vars_dialog.error = None;
+            }
+            KeyCode::Tab | KeyCode::Down => {
+                let f = app.create_dialog.env_vars_dialog.add_field;
+                app.create_dialog.env_vars_dialog.add_field = (f + 1) % 2;
+            }
+            KeyCode::BackTab | KeyCode::Up => {
+                let f = app.create_dialog.env_vars_dialog.add_field;
+                app.create_dialog.env_vars_dialog.add_field = (f + 1) % 2;
+            }
+            KeyCode::Backspace => {
+                let dialog = &mut app.create_dialog.env_vars_dialog;
+                if dialog.add_field == 0 {
+                    dialog.key_input.pop();
+                } else {
+                    dialog.value_input.pop();
+                }
+                dialog.error = None;
+            }
+            KeyCode::Enter => {
+                let dialog = &mut app.create_dialog.env_vars_dialog;
+                if dialog.add_field == 0 {
+                    // Move focus to the value field.
+                    dialog.add_field = 1;
+                } else {
+                    let key = dialog.key_input.trim().to_owned();
+                    let value = dialog.value_input.clone();
+                    if key.is_empty() {
+                        dialog.error = Some("Key cannot be empty".into());
+                    } else if key.contains('=') {
+                        dialog.error = Some("Key must not contain '='".into());
+                    } else {
+                        dialog.entries.push((key, value));
+                        dialog.selected = dialog.entries.len().saturating_sub(1);
+                        dialog.mode = SubDialogMode::List;
+                        dialog.error = None;
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                let dialog = &mut app.create_dialog.env_vars_dialog;
+                // Disallow '=' in the key field.
+                if dialog.add_field == 0 && c == '=' {
+                    dialog.error = Some("Key must not contain '='".into());
+                    return;
+                }
+                if dialog.add_field == 0 {
+                    dialog.key_input.push(c);
+                } else {
+                    dialog.value_input.push(c);
+                }
+                dialog.error = None;
+            }
+            _ => {}
+        },
+    }
+}
+
 fn submit_create_dialog(app: &mut App) {
     let dlg = &app.create_dialog;
 
@@ -905,35 +1174,8 @@ fn submit_create_dialog(app: &mut App) {
         }
     };
 
-    let mut ports: Vec<(u16, u16)> = Vec::new();
-    for token in dlg
-        .ports
-        .split(|c: char| c == ',' || c.is_whitespace())
-        .filter(|s| !s.is_empty())
-    {
-        match parse_port_mapping(token) {
-            Ok(p) => ports.push(p),
-            Err(e) => {
-                app.create_dialog.error = Some(format!("Port '{token}': {e}"));
-                return;
-            }
-        }
-    }
-
-    let mut env_vars: Vec<(String, String)> = Vec::new();
-    for token in dlg
-        .env_vars
-        .split(|c: char| c == ',' || c.is_whitespace())
-        .filter(|s| !s.is_empty())
-    {
-        match parse_env_var(token) {
-            Ok(e) => env_vars.push(e),
-            Err(e) => {
-                app.create_dialog.error = Some(format!("Env '{token}': {e}"));
-                return;
-            }
-        }
-    }
+    let ports = dlg.ports.clone();
+    let env_vars = dlg.env_vars.clone();
 
     let hostname = dlg.hostname.trim().to_owned();
     let hostname = if hostname.is_empty() {
@@ -1015,29 +1257,6 @@ fn submit_create_dialog(app: &mut App) {
             let _ = tx.send(AppMessage::SandboxList(Ok(list)));
         }
     });
-}
-
-fn parse_port_mapping(s: &str) -> std::result::Result<(u16, u16), String> {
-    let parts: Vec<&str> = s.splitn(2, ':').collect();
-    if parts.len() != 2 {
-        return Err("expected host:guest format".into());
-    }
-
-    let host = parts[0]
-        .parse::<u16>()
-        .map_err(|_| "invalid host port".to_owned())?;
-    let guest = parts[1]
-        .parse::<u16>()
-        .map_err(|_| "invalid guest port".to_owned())?;
-    Ok((host, guest))
-}
-
-fn parse_env_var(s: &str) -> std::result::Result<(String, String), String> {
-    match s.find('=') {
-        Some(pos) if pos > 0 => Ok((s[..pos].to_owned(), s[pos + 1..].to_owned())),
-        Some(_) => Err("key cannot be empty".into()),
-        None => Err("expected KEY=VALUE format".into()),
-    }
 }
 
 //--------------------------------------------------------------------------------------------------
