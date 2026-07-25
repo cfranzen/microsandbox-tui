@@ -240,23 +240,37 @@ fn render_toggle(f: &mut Frame, label: &str, value: bool, focused: bool, area: R
 
 /// Render the Create Sandbox button at the bottom of the form.
 fn render_create_button(f: &mut Frame, focused: bool, area: Rect) {
-    let (label, style) = if focused {
+    // Use a multi-span Line so we can mix styles within a single row.
+    // Focused:   ──────────────────── ✚ Create Sandbox ▶
+    // Unfocused: ──────────────────── ✚ Create Sandbox ▶  (dimmed)
+    let label = " ✚ Create Sandbox ";
+
+    let (fill_style, label_style, arrow_style) = if focused {
         (
-            "[ ✚ Create Sandbox ]",
+            Style::default().fg(Color::DarkGray),
             Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         )
     } else {
         (
-            "[ ✚ Create Sandbox ]",
+            Style::default().fg(Color::DarkGray),
+            Style::default().fg(Color::DarkGray),
             Style::default().fg(Color::DarkGray),
         )
     };
 
-    // Centre the label within the available area.
-    let label_len = label.chars().count() as u16;
-    let x = area.x + area.width.saturating_sub(label_len) / 2;
-    let btn_area = Rect::new(x, area.y, label_len.min(area.width), 1);
-    f.render_widget(Paragraph::new(Span::styled(label, style)), btn_area);
+    // Arrow glyph that bookends the label, Powerline-style.
+    let arrow = "▶";
+    let label_width = label.chars().count() as u16 + arrow.chars().count() as u16;
+    let fill_width = area.width.saturating_sub(label_width);
+
+    let line = Line::from(vec![
+        Span::styled("─".repeat(fill_width as usize), fill_style),
+        Span::styled(label, label_style),
+        Span::styled(arrow, arrow_style),
+    ]);
+
+    f.render_widget(Paragraph::new(line), area);
 }
 
 /// Format a list of port mappings as a compact summary string.
