@@ -9,9 +9,6 @@ mod logs;
 mod metrics;
 mod sandbox_list;
 
-#[cfg(test)]
-mod tests;
-
 use ratatui::Frame;
 
 use crate::app::App;

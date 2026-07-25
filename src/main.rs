@@ -1,4 +1,6 @@
-//! Entry point: terminal setup, panic hook, run loop, cleanup.
+//! Binary entry point — terminal setup, panic hook, and run loop.
+//!
+//! All application logic lives in the `microsandbox_tui` library crate.
 
 use std::io;
 use std::panic;
@@ -8,16 +10,13 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use microsandbox_tui::app;
 use ratatui::{Terminal, backend::CrosstermBackend};
-
-mod app;
-mod sandbox;
-mod ui;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Install a panic hook that restores the terminal before printing the
-    // panic message so the shell is not left in raw mode.
+    // Restore the terminal before printing any panic message so the shell is
+    // not left in raw mode if the application crashes.
     let default_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
         let _ = restore_terminal();

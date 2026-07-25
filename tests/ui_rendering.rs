@@ -1,15 +1,16 @@
-//! UI rendering tests using ratatui's TestBackend.
+//! Integration tests for the full UI rendering pipeline.
 //!
-//! All tests are async (`#[tokio::test]`) so that render functions that
-//! trigger background data fetches via `tokio::spawn` work correctly inside
-//! tests.  Where possible, caches (logs, metrics, fs_entries) are
-//! pre-populated so the render code does not need to spawn at all.
+//! Uses ratatui's [`TestBackend`] to render frames into an in-memory buffer
+//! and asserts that key text is present.  Tests are async (`#[tokio::test]`)
+//! because some render functions trigger background data fetches via
+//! `tokio::spawn` when their caches are empty.  Where possible, caches are
+//! pre-seeded to keep tests deterministic and spawn-free.
 
 use ratatui::{Terminal, backend::TestBackend};
 use tokio::sync::mpsc;
 
-use crate::app::{App, AppMessage, CreateDialog, DetailTab, Focus};
-use crate::sandbox::{FsEntry, LocalFsEntryKind, MetricsSnapshot, SandboxInfo, SandboxStatus};
+use microsandbox_tui::app::{App, AppMessage, CreateDialog, DetailTab, Focus};
+use microsandbox_tui::sandbox::{FsEntry, LocalFsEntryKind, MetricsSnapshot, SandboxInfo, SandboxStatus};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -31,13 +32,12 @@ fn make_sandbox(name: &str, status: SandboxStatus) -> SandboxInfo {
 }
 
 fn make_terminal() -> Terminal<TestBackend> {
-    let backend = TestBackend::new(120, 40);
-    Terminal::new(backend).expect("terminal")
+    Terminal::new(TestBackend::new(120, 40)).expect("terminal")
 }
 
 fn render_to_string(terminal: &mut Terminal<TestBackend>, app: &mut App) -> String {
     terminal
-        .draw(|f| crate::ui::render(f, app))
+        .draw(|f| microsandbox_tui::ui::render(f, app))
         .expect("draw");
     terminal
         .backend()
@@ -48,17 +48,14 @@ fn render_to_string(terminal: &mut Terminal<TestBackend>, app: &mut App) -> Stri
         .collect()
 }
 
-/// Pre-populate an empty log cache entry so the logs renderer does not spawn.
 fn seed_logs(app: &mut App, name: &str) {
     app.logs.insert(name.into(), vec![]);
 }
 
-/// Pre-populate a metrics cache entry so the metrics renderer does not spawn.
 fn seed_metrics(app: &mut App, name: &str) {
     app.metrics.insert(name.into(), MetricsSnapshot::default());
 }
 
-/// Pre-populate a filesystem cache entry so the fs renderer does not spawn.
 fn seed_fs(app: &mut App, name: &str) {
     app.fs_entries.insert(
         (name.into(), "/".into()),
@@ -66,7 +63,7 @@ fn seed_fs(app: &mut App, name: &str) {
     );
 }
 
-// ── Full render smoke tests ───────────────────────────────────────────────────
+// ── Smoke tests ───────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn test_render_empty_state_no_panic() {
@@ -80,7 +77,7 @@ async fn test_render_header_contains_app_name() {
     let mut terminal = make_terminal();
     let mut app = make_app();
     let buf = render_to_string(&mut terminal, &mut app);
-    assert!(buf.contains("microsandbox"), "header should show app name; got: {buf:?}");
+    assert!(buf.contains("microsandbox"), "header should show app name");
 }
 
 #[tokio::test]
@@ -98,7 +95,7 @@ async fn test_render_with_running_sandbox() {
     app.sandboxes.push(make_sandbox("runner", SandboxStatus::Running));
     seed_logs(&mut app, "runner");
     let buf = render_to_string(&mut terminal, &mut app);
-    assert!(buf.contains("runner"), "sandbox name should appear");
+    assert!(buf.contains("runner"));
 }
 
 #[tokio::test]
@@ -109,6 +106,16 @@ async fn test_render_with_stopped_sandbox() {
     seed_logs(&mut app, "stopper");
     let buf = render_to_string(&mut terminal, &mut app);
     assert!(buf.contains("stopper"));
+}
+
+#[tokio::test]
+async fn test_render_with_crashed_sandbox() {
+    let mut terminal = make_terminal();
+    let mut app = make_app();
+    app.sandboxes.push(make_sandbox("crasher", SandboxStatus::Crashed));
+    seed_logs(&mut app, "crasher");
+    let buf = render_to_string(&mut terminal, &mut app);
+    assert!(buf.contains("crasher"));
 }
 
 #[tokio::test]
@@ -123,7 +130,7 @@ async fn test_render_with_multiple_sandboxes() {
     assert!(buf.contains("beta"));
 }
 
-// ── Logs tab ─────────────────────────────────────────────────────────────────
+// ── Detail tabs ───────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn test_render_logs_tab_no_panic() {
@@ -136,7 +143,7 @@ async fn test_render_logs_tab_no_panic() {
 }
 
 #[tokio::test]
-async fn test_render_logs_tab_shows_tab_label() {
+async fn test_render_logs_tab_shows_label() {
     let mut terminal = make_terminal();
     let mut app = make_app();
     app.sandboxes.push(make_sandbox("box", SandboxStatus::Running));
@@ -145,8 +152,6 @@ async fn test_render_logs_tab_shows_tab_label() {
     let buf = render_to_string(&mut terminal, &mut app);
     assert!(buf.contains("Logs"));
 }
-
-// ── Metrics tab ──────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn test_render_metrics_tab_no_panic() {
@@ -177,17 +182,10 @@ async fn test_render_metrics_tab_with_data() {
     app.tab = DetailTab::Metrics;
     app.metrics.insert(
         "box".into(),
-        MetricsSnapshot {
-            cpu_percent: 55.0,
-            memory_bytes: 128 * 1024 * 1024,
-            uptime_secs: 120,
-            ..Default::default()
-        },
+        MetricsSnapshot { cpu_percent: 55.0, memory_bytes: 128 * 1024 * 1024, uptime_secs: 120, ..Default::default() },
     );
     render_to_string(&mut terminal, &mut app);
 }
-
-// ── Filesystem tab ────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn test_render_filesystem_tab_no_panic() {
@@ -226,8 +224,6 @@ async fn test_render_filesystem_tab_with_entries() {
     let buf = render_to_string(&mut terminal, &mut app);
     assert!(buf.contains("etc") || buf.contains("/etc"));
 }
-
-// ── Info tab ──────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn test_render_info_tab_no_panic() {
@@ -277,16 +273,15 @@ async fn test_render_create_dialog_shows_field_labels() {
 }
 
 #[tokio::test]
-async fn test_render_create_dialog_is_closed_by_default() {
+async fn test_render_create_dialog_closed_by_default() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    // dialog.visible == false by default
     assert!(!app.create_dialog.visible);
-    render_to_string(&mut terminal, &mut app); // must not panic
+    render_to_string(&mut terminal, &mut app);
 }
 
 #[tokio::test]
-async fn test_render_create_dialog_shows_error() {
+async fn test_render_create_dialog_shows_validation_error() {
     let mut terminal = make_terminal();
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
@@ -295,10 +290,10 @@ async fn test_render_create_dialog_shows_error() {
     assert!(buf.contains("Name is required"));
 }
 
-// ── Focus rendering ───────────────────────────────────────────────────────────
+// ── Focus and panel state ─────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn test_render_with_detail_focus_no_panic() {
+async fn test_render_detail_focus_no_panic() {
     let mut terminal = make_terminal();
     let mut app = make_app();
     app.sandboxes.push(make_sandbox("box", SandboxStatus::Running));
@@ -308,17 +303,17 @@ async fn test_render_with_detail_focus_no_panic() {
 }
 
 #[tokio::test]
-async fn test_render_no_sandbox_selected_detail_empty() {
+async fn test_render_empty_list_detail_focus_no_panic() {
     let mut terminal = make_terminal();
     let mut app = make_app();
     app.focus = Focus::Detail;
-    render_to_string(&mut terminal, &mut app); // must not panic
+    render_to_string(&mut terminal, &mut app);
 }
 
 // ── Notification bar ──────────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn test_render_notification_visible_in_footer() {
+async fn test_render_info_notification_in_footer() {
     let mut terminal = make_terminal();
     let mut app = make_app();
     app.notify("Sandbox started", false);
@@ -327,7 +322,7 @@ async fn test_render_notification_visible_in_footer() {
 }
 
 #[tokio::test]
-async fn test_render_error_notification_visible() {
+async fn test_render_error_notification_in_footer() {
     let mut terminal = make_terminal();
     let mut app = make_app();
     app.notify("Something went wrong", true);
@@ -339,10 +334,9 @@ async fn test_render_error_notification_visible() {
 
 #[tokio::test]
 async fn test_render_very_small_terminal_no_panic() {
-    let backend = TestBackend::new(20, 5);
-    let mut terminal = Terminal::new(backend).expect("terminal");
+    let mut terminal = Terminal::new(TestBackend::new(20, 5)).expect("terminal");
     let mut app = make_app();
-    terminal.draw(|f| crate::ui::render(f, &mut app)).expect("draw");
+    terminal.draw(|f| microsandbox_tui::ui::render(f, &mut app)).expect("draw");
 }
 
 #[tokio::test]
@@ -360,7 +354,7 @@ async fn test_render_all_tabs_sequentially_no_panic() {
 }
 
 #[tokio::test]
-async fn test_render_many_sandboxes_no_panic() {
+async fn test_render_twenty_sandboxes_no_panic() {
     let mut terminal = make_terminal();
     let mut app = make_app();
     for i in 0..20 {
@@ -369,14 +363,4 @@ async fn test_render_many_sandboxes_no_panic() {
     }
     seed_logs(&mut app, "sandbox-00");
     render_to_string(&mut terminal, &mut app);
-}
-
-#[tokio::test]
-async fn test_render_crashed_sandbox_no_panic() {
-    let mut terminal = make_terminal();
-    let mut app = make_app();
-    app.sandboxes.push(make_sandbox("crasher", SandboxStatus::Crashed));
-    seed_logs(&mut app, "crasher");
-    let buf = render_to_string(&mut terminal, &mut app);
-    assert!(buf.contains("crasher"));
 }
