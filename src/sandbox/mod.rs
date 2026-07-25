@@ -1,0 +1,229 @@
+//! Sandbox management: wraps the microsandbox SDK into async operations
+//! that feed the TUI's state machine.
+
+use anyhow::Result;
+use chrono::{DateTime, Utc};
+use microsandbox::sandbox::{FsEntryKind, LogEntry, LogOptions, LogSource};
+use microsandbox::{Sandbox, SandboxMetrics};
+
+// Re-export for use in other modules
+pub use microsandbox::sandbox::SandboxStatus;
+
+//--------------------------------------------------------------------------------------------------
+// Types
+//--------------------------------------------------------------------------------------------------
+
+/// Local snapshot of a sandbox's state used to drive the TUI.
+#[derive(Debug, Clone)]
+pub struct SandboxInfo {
+    pub name: String,
+    pub status: SandboxStatus,
+    pub image: String,
+    pub cpus: u8,
+    pub memory_mib: u32,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+/// A point-in-time metrics snapshot for a sandbox.
+#[derive(Debug, Clone, Default)]
+pub struct MetricsSnapshot {
+    pub cpu_percent: f64,
+    pub memory_bytes: u64,
+    pub disk_read_bytes: u64,
+    pub disk_write_bytes: u64,
+    pub net_rx_bytes: u64,
+    pub net_tx_bytes: u64,
+    pub uptime_secs: u64,
+}
+
+/// A filesystem entry inside a running sandbox.
+#[derive(Debug, Clone)]
+pub struct FsEntry {
+    pub path: String,
+    pub kind: LocalFsEntryKind,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalFsEntryKind {
+    File,
+    Directory,
+    Symlink,
+    Other,
+}
+
+//--------------------------------------------------------------------------------------------------
+// List
+//--------------------------------------------------------------------------------------------------
+
+/// Retrieve all sandboxes from the local backend.
+pub async fn list_sandboxes() -> Result<Vec<SandboxInfo>> {
+    let handles = Sandbox::list().await?;
+    let mut infos = Vec::with_capacity(handles.len());
+    for h in handles {
+        let (image, cpus, memory_mib) = if let Ok(cfg) = h.config() {
+            let image = match &cfg.spec.image {
+                img => img.oci_reference().unwrap_or("(bind/disk)").to_owned(),
+            };
+            (image, cfg.spec.resources.cpus, cfg.spec.resources.memory_mib)
+        } else {
+            ("—".into(), 1, 512)
+        };
+
+        infos.push(SandboxInfo {
+            name: h.name().to_owned(),
+            status: h.status_snapshot(),
+            image,
+            cpus,
+            memory_mib,
+            created_at: h.created_at(),
+            updated_at: h.updated_at(),
+        });
+    }
+    Ok(infos)
+}
+
+//--------------------------------------------------------------------------------------------------
+// Lifecycle
+//--------------------------------------------------------------------------------------------------
+
+/// Start a stopped sandbox in detached mode so it outlives the TUI.
+pub async fn start_sandbox(name: &str) -> Result<()> {
+    let handle = Sandbox::get(name).await?;
+    let sb = handle.start_detached().await?;
+    sb.detach().await;
+    Ok(())
+}
+
+/// Gracefully stop a running sandbox.
+pub async fn stop_sandbox(name: &str) -> Result<()> {
+    let handle = Sandbox::get(name).await?;
+    handle.stop().await?;
+    Ok(())
+}
+
+/// Kill a sandbox immediately.
+pub async fn kill_sandbox(name: &str) -> Result<()> {
+    let handle = Sandbox::get(name).await?;
+    handle.kill().await?;
+    Ok(())
+}
+
+/// Remove a stopped sandbox and all its state.
+pub async fn remove_sandbox(name: &str) -> Result<()> {
+    let handle = Sandbox::get(name).await?;
+    handle.remove().await?;
+    Ok(())
+}
+
+/// Create and immediately detach a new sandbox.
+pub async fn create_sandbox(name: &str, image: &str, cpus: u8, memory_mib: u32) -> Result<()> {
+    let sb = Sandbox::builder(name)
+        .image(image)
+        .cpus(cpus)
+        .memory(memory_mib)
+        .detached(true)
+        .create()
+        .await?;
+    sb.detach().await;
+    Ok(())
+}
+
+//--------------------------------------------------------------------------------------------------
+// Logs
+//--------------------------------------------------------------------------------------------------
+
+/// Read recent log entries for a sandbox (works for running and stopped).
+pub async fn read_logs(name: &str, tail: Option<usize>) -> Result<Vec<LogEntry>> {
+    let handle = Sandbox::get(name).await?;
+    let entries = handle
+        .logs(&LogOptions {
+            tail,
+            sources: vec![
+                LogSource::Stdout,
+                LogSource::Stderr,
+                LogSource::Output,
+                LogSource::System,
+            ],
+            ..Default::default()
+        })
+        .await?;
+    Ok(entries)
+}
+
+//--------------------------------------------------------------------------------------------------
+// Metrics
+//--------------------------------------------------------------------------------------------------
+
+/// Fetch a single metrics snapshot for a running sandbox.
+/// Returns `None` when the sandbox is stopped or unreachable.
+pub async fn fetch_metrics(name: &str) -> Result<Option<MetricsSnapshot>> {
+    let handle = match Sandbox::get(name).await {
+        Ok(h) => h,
+        Err(_) => return Ok(None),
+    };
+
+    if handle.status_snapshot() != SandboxStatus::Running {
+        return Ok(None);
+    }
+
+    let m: SandboxMetrics = match handle.metrics().await {
+        Ok(m) => m,
+        Err(_) => return Ok(None),
+    };
+
+    Ok(Some(MetricsSnapshot {
+        cpu_percent: m.cpu_percent as f64,
+        memory_bytes: m.memory_bytes,
+        disk_read_bytes: m.disk_read_bytes,
+        disk_write_bytes: m.disk_write_bytes,
+        net_rx_bytes: m.net_rx_bytes,
+        net_tx_bytes: m.net_tx_bytes,
+        uptime_secs: m.uptime.as_secs(),
+    }))
+}
+
+//--------------------------------------------------------------------------------------------------
+// Filesystem
+//--------------------------------------------------------------------------------------------------
+
+/// List the contents of a directory inside a running sandbox.
+/// Returns `None` when the sandbox is stopped or unreachable.
+pub async fn list_fs(name: &str, path: &str) -> Result<Option<Vec<FsEntry>>> {
+    let handle = match Sandbox::get(name).await {
+        Ok(h) => h,
+        Err(_) => return Ok(None),
+    };
+
+    if handle.status_snapshot() != SandboxStatus::Running {
+        return Ok(None);
+    }
+
+    let sb = match handle.connect().await {
+        Ok(sb) => sb,
+        Err(_) => return Ok(None),
+    };
+
+    let entries = match sb.fs().list(path).await {
+        Ok(e) => e,
+        Err(_) => return Ok(None),
+    };
+
+    let result = entries
+        .into_iter()
+        .map(|e| FsEntry {
+            path: e.path,
+            kind: match e.kind {
+                FsEntryKind::File => LocalFsEntryKind::File,
+                FsEntryKind::Directory => LocalFsEntryKind::Directory,
+                FsEntryKind::Symlink => LocalFsEntryKind::Symlink,
+                _ => LocalFsEntryKind::Other,
+            },
+            size: e.size,
+        })
+        .collect();
+
+    Ok(Some(result))
+}
+
