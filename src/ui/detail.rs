@@ -1,11 +1,11 @@
 //! Right panel: tab bar + dispatch to tab-specific renderers.
 
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph},
+    Frame,
 };
 
 use crate::app::{App, DetailTab, Focus};

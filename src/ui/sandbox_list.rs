@@ -1,11 +1,11 @@
 //! Left panel: sandbox list with status cards.
 
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph},
+    Frame,
 };
 
 use microsandbox::sandbox::SandboxStatus;
@@ -77,7 +77,13 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
                 width: w,
                 height: CARD_TOTAL_HEIGHT,
             };
-            render_sandbox_card(f, &app.sandboxes[abs_idx], selected, panel_focused, card_area);
+            render_sandbox_card(
+                f,
+                &app.sandboxes[abs_idx],
+                selected,
+                panel_focused,
+                card_area,
+            );
             y += CARD_TOTAL_HEIGHT;
         } else {
             // "New Sandbox" entry
@@ -143,7 +149,11 @@ fn render_sandbox_card(
             truncate(&sb.name, inner.width.saturating_sub(4) as usize),
             Style::default()
                 .fg(if selected { Color::White } else { Color::Gray })
-                .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() }),
+                .add_modifier(if selected {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
         ),
         if selected {
             Span::styled(" ✓", Style::default().fg(Color::Green))
@@ -154,7 +164,10 @@ fn render_sandbox_card(
 
     // Line 2: image name
     let image_line = Line::from(vec![Span::styled(
-        format!("  {}", truncate(&sb.image, inner.width.saturating_sub(3) as usize)),
+        format!(
+            "  {}",
+            truncate(&sb.image, inner.width.saturating_sub(3) as usize)
+        ),
         Style::default().fg(Color::DarkGray),
     )]);
 
@@ -169,7 +182,7 @@ fn render_sandbox_card(
 
     let resource_line = Line::from(vec![Span::styled(
         format!(
-            "  {}c · {}MiB · {}",
+            "  {}cpus · {}MiB · {}",
             sb.cpus,
             sb.memory_mib,
             truncate(&age, 10)

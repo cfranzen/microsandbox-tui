@@ -1,11 +1,11 @@
 //! Main layout: header, two-column body, footer.
 
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Paragraph},
+    widgets::Paragraph,
+    Frame,
 };
 
 use crate::app::App;
@@ -48,10 +48,7 @@ pub fn render_header(f: &mut Frame, area: Rect) {
         " Manage microsandbox microVMs",
         Style::default().fg(Color::DarkGray),
     );
-    let version = Span::styled(
-        " v0.1.0 ",
-        Style::default().fg(Color::DarkGray),
-    );
+    let version = Span::styled(" v0.1.0 ", Style::default().fg(Color::DarkGray));
 
     let line = Line::from(vec![title, subtitle]);
     let version_line = Line::from(vec![version]).alignment(Alignment::Right);

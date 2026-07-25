@@ -1,11 +1,11 @@
 //! Metrics tab: CPU bar, memory bar, disk I/O, network I/O, uptime.
 
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Gauge, Paragraph},
+    Frame,
 };
 
 use crate::app::App;
@@ -109,7 +109,11 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         Paragraph::new(Line::from(vec![
             Span::styled(" Disk  ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                format!("↑ {}  ↓ {}", fmt_bytes(m.disk_write_bytes), fmt_bytes(m.disk_read_bytes)),
+                format!(
+                    "↑ {}  ↓ {}",
+                    fmt_bytes(m.disk_write_bytes),
+                    fmt_bytes(m.disk_read_bytes)
+                ),
                 Style::default().fg(Color::White),
             ),
         ])),
@@ -121,7 +125,11 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         Paragraph::new(Line::from(vec![
             Span::styled(" Net   ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                format!("↑ {}  ↓ {}", fmt_bytes(m.net_tx_bytes), fmt_bytes(m.net_rx_bytes)),
+                format!(
+                    "↑ {}  ↓ {}",
+                    fmt_bytes(m.net_tx_bytes),
+                    fmt_bytes(m.net_rx_bytes)
+                ),
                 Style::default().fg(Color::White),
             ),
         ])),
@@ -129,7 +137,8 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     );
 
     // --- Uptime ---
-    let uptime_str = humantime::format_duration(std::time::Duration::from_secs(m.uptime_secs)).to_string();
+    let uptime_str =
+        humantime::format_duration(std::time::Duration::from_secs(m.uptime_secs)).to_string();
 
     f.render_widget(
         Paragraph::new(Line::from(vec![

@@ -11,4 +11,4 @@ Runnable examples: <https://github.com/superradcompany/microsandbox/tree/main/ex
 
 ## Key Conventions
 
-All coding conventions can be found in dedicated instruction files in the folder /.agents/instructions/**
+For all Rust-specific coding conventions read `.agents/instructions/rust.instructions.md`

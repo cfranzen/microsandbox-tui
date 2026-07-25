@@ -1,11 +1,11 @@
 //! Info tab: full sandbox configuration dump.
 
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
+    Frame,
 };
 
 use crate::app::App;

@@ -1,11 +1,11 @@
 //! Filesystem tab: directory listing, kind icons, size column, navigate up.
 
 use ratatui::{
-    Frame,
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
+    Frame,
 };
 
 use microsandbox::sandbox::SandboxStatus;
@@ -31,7 +31,10 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     let fs_path = app.fs_path.clone();
-    let entries = app.fs_entries.get(&(name.clone(), fs_path.clone())).cloned();
+    let entries = app
+        .fs_entries
+        .get(&(name.clone(), fs_path.clone()))
+        .cloned();
 
     if entries.is_none() {
         app.request_fs(&name, &fs_path);
@@ -51,7 +54,9 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         Span::styled(" Path: ", Style::default().fg(Color::DarkGray)),
         Span::styled(
             fs_path.clone(),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             "  (Backspace to go up)",
@@ -120,10 +125,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 
     let table = Table::new(rows, widths)
         .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::NONE),
-        )
+        .block(Block::default().borders(Borders::NONE))
         .column_spacing(1);
 
     f.render_widget(table, chunks[1]);
@@ -145,11 +147,13 @@ fn entry_row(e: &FsEntry) -> Row<'_> {
         Cell::from(Span::styled(icon, Style::default().fg(color))),
         Cell::from(Span::styled(
             path.to_owned(),
-            Style::default().fg(color).add_modifier(if e.kind == LocalFsEntryKind::Directory {
-                Modifier::BOLD
-            } else {
-                Modifier::empty()
-            }),
+            Style::default()
+                .fg(color)
+                .add_modifier(if e.kind == LocalFsEntryKind::Directory {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
         )),
         Cell::from(Span::styled(size_str, Style::default().fg(Color::DarkGray))),
     ])

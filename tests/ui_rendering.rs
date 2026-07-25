@@ -6,11 +6,13 @@
 //! `tokio::spawn` when their caches are empty.  Where possible, caches are
 //! pre-seeded to keep tests deterministic and spawn-free.
 
-use ratatui::{Terminal, backend::TestBackend};
+use ratatui::{backend::TestBackend, Terminal};
 use tokio::sync::mpsc;
 
 use microsandbox_tui::app::{App, AppMessage, CreateDialog, DetailTab, Focus};
-use microsandbox_tui::sandbox::{FsEntry, LocalFsEntryKind, MetricsSnapshot, SandboxInfo, SandboxStatus};
+use microsandbox_tui::sandbox::{
+    FsEntry, LocalFsEntryKind, MetricsSnapshot, SandboxInfo, SandboxStatus,
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -59,7 +61,11 @@ fn seed_metrics(app: &mut App, name: &str) {
 fn seed_fs(app: &mut App, name: &str) {
     app.fs_entries.insert(
         (name.into(), "/".into()),
-        vec![FsEntry { path: "/etc".into(), kind: LocalFsEntryKind::Directory, size: 0 }],
+        vec![FsEntry {
+            path: "/etc".into(),
+            kind: LocalFsEntryKind::Directory,
+            size: 0,
+        }],
     );
 }
 
@@ -92,7 +98,8 @@ async fn test_render_footer_contains_quit_hint() {
 async fn test_render_with_running_sandbox() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    app.sandboxes.push(make_sandbox("runner", SandboxStatus::Running));
+    app.sandboxes
+        .push(make_sandbox("runner", SandboxStatus::Running));
     seed_logs(&mut app, "runner");
     let buf = render_to_string(&mut terminal, &mut app);
     assert!(buf.contains("runner"));
@@ -102,7 +109,8 @@ async fn test_render_with_running_sandbox() {
 async fn test_render_with_stopped_sandbox() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    app.sandboxes.push(make_sandbox("stopper", SandboxStatus::Stopped));
+    app.sandboxes
+        .push(make_sandbox("stopper", SandboxStatus::Stopped));
     seed_logs(&mut app, "stopper");
     let buf = render_to_string(&mut terminal, &mut app);
     assert!(buf.contains("stopper"));
@@ -112,7 +120,8 @@ async fn test_render_with_stopped_sandbox() {
 async fn test_render_with_crashed_sandbox() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    app.sandboxes.push(make_sandbox("crasher", SandboxStatus::Crashed));
+    app.sandboxes
+        .push(make_sandbox("crasher", SandboxStatus::Crashed));
     seed_logs(&mut app, "crasher");
     let buf = render_to_string(&mut terminal, &mut app);
     assert!(buf.contains("crasher"));
@@ -122,8 +131,10 @@ async fn test_render_with_crashed_sandbox() {
 async fn test_render_with_multiple_sandboxes() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    app.sandboxes.push(make_sandbox("alpha", SandboxStatus::Running));
-    app.sandboxes.push(make_sandbox("beta", SandboxStatus::Stopped));
+    app.sandboxes
+        .push(make_sandbox("alpha", SandboxStatus::Running));
+    app.sandboxes
+        .push(make_sandbox("beta", SandboxStatus::Stopped));
     seed_logs(&mut app, "alpha");
     let buf = render_to_string(&mut terminal, &mut app);
     assert!(buf.contains("alpha"));
@@ -136,7 +147,8 @@ async fn test_render_with_multiple_sandboxes() {
 async fn test_render_logs_tab_no_panic() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    app.sandboxes.push(make_sandbox("box", SandboxStatus::Running));
+    app.sandboxes
+        .push(make_sandbox("box", SandboxStatus::Running));
     app.tab = DetailTab::Logs;
     seed_logs(&mut app, "box");
     render_to_string(&mut terminal, &mut app);
@@ -146,7 +158,8 @@ async fn test_render_logs_tab_no_panic() {
 async fn test_render_logs_tab_shows_label() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    app.sandboxes.push(make_sandbox("box", SandboxStatus::Running));
+    app.sandboxes
+        .push(make_sandbox("box", SandboxStatus::Running));
     app.tab = DetailTab::Logs;
     seed_logs(&mut app, "box");
     let buf = render_to_string(&mut terminal, &mut app);
@@ -157,7 +170,8 @@ async fn test_render_logs_tab_shows_label() {
 async fn test_render_metrics_tab_no_panic() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    app.sandboxes.push(make_sandbox("box", SandboxStatus::Running));
+    app.sandboxes
+        .push(make_sandbox("box", SandboxStatus::Running));
     app.tab = DetailTab::Metrics;
     seed_metrics(&mut app, "box");
     render_to_string(&mut terminal, &mut app);
@@ -167,7 +181,8 @@ async fn test_render_metrics_tab_no_panic() {
 async fn test_render_metrics_tab_shows_label() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    app.sandboxes.push(make_sandbox("box", SandboxStatus::Running));
+    app.sandboxes
+        .push(make_sandbox("box", SandboxStatus::Running));
     app.tab = DetailTab::Metrics;
     seed_metrics(&mut app, "box");
     let buf = render_to_string(&mut terminal, &mut app);
@@ -178,11 +193,17 @@ async fn test_render_metrics_tab_shows_label() {
 async fn test_render_metrics_tab_with_data() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    app.sandboxes.push(make_sandbox("box", SandboxStatus::Running));
+    app.sandboxes
+        .push(make_sandbox("box", SandboxStatus::Running));
     app.tab = DetailTab::Metrics;
     app.metrics.insert(
         "box".into(),
-        MetricsSnapshot { cpu_percent: 55.0, memory_bytes: 128 * 1024 * 1024, uptime_secs: 120, ..Default::default() },
+        MetricsSnapshot {
+            cpu_percent: 55.0,
+            memory_bytes: 128 * 1024 * 1024,
+            uptime_secs: 120,
+            ..Default::default()
+        },
     );
     render_to_string(&mut terminal, &mut app);
 }
@@ -191,7 +212,8 @@ async fn test_render_metrics_tab_with_data() {
 async fn test_render_filesystem_tab_no_panic() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    app.sandboxes.push(make_sandbox("box", SandboxStatus::Running));
+    app.sandboxes
+        .push(make_sandbox("box", SandboxStatus::Running));
     app.tab = DetailTab::Filesystem;
     seed_fs(&mut app, "box");
     render_to_string(&mut terminal, &mut app);
@@ -201,7 +223,8 @@ async fn test_render_filesystem_tab_no_panic() {
 async fn test_render_filesystem_tab_shows_label() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    app.sandboxes.push(make_sandbox("box", SandboxStatus::Running));
+    app.sandboxes
+        .push(make_sandbox("box", SandboxStatus::Running));
     app.tab = DetailTab::Filesystem;
     seed_fs(&mut app, "box");
     let buf = render_to_string(&mut terminal, &mut app);
@@ -212,13 +235,22 @@ async fn test_render_filesystem_tab_shows_label() {
 async fn test_render_filesystem_tab_with_entries() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    app.sandboxes.push(make_sandbox("box", SandboxStatus::Running));
+    app.sandboxes
+        .push(make_sandbox("box", SandboxStatus::Running));
     app.tab = DetailTab::Filesystem;
     app.fs_entries.insert(
         ("box".into(), "/".into()),
         vec![
-            FsEntry { path: "/etc".into(), kind: LocalFsEntryKind::Directory, size: 0 },
-            FsEntry { path: "/bin/sh".into(), kind: LocalFsEntryKind::File, size: 4096 },
+            FsEntry {
+                path: "/etc".into(),
+                kind: LocalFsEntryKind::Directory,
+                size: 0,
+            },
+            FsEntry {
+                path: "/bin/sh".into(),
+                kind: LocalFsEntryKind::File,
+                size: 4096,
+            },
         ],
     );
     let buf = render_to_string(&mut terminal, &mut app);
@@ -229,7 +261,8 @@ async fn test_render_filesystem_tab_with_entries() {
 async fn test_render_info_tab_no_panic() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    app.sandboxes.push(make_sandbox("infobox", SandboxStatus::Stopped));
+    app.sandboxes
+        .push(make_sandbox("infobox", SandboxStatus::Stopped));
     app.tab = DetailTab::Info;
     render_to_string(&mut terminal, &mut app);
 }
@@ -238,7 +271,8 @@ async fn test_render_info_tab_no_panic() {
 async fn test_render_info_tab_shows_sandbox_name() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    app.sandboxes.push(make_sandbox("infobox", SandboxStatus::Stopped));
+    app.sandboxes
+        .push(make_sandbox("infobox", SandboxStatus::Stopped));
     app.tab = DetailTab::Info;
     let buf = render_to_string(&mut terminal, &mut app);
     assert!(buf.contains("infobox"));
@@ -296,7 +330,8 @@ async fn test_render_create_dialog_shows_validation_error() {
 async fn test_render_detail_focus_no_panic() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    app.sandboxes.push(make_sandbox("box", SandboxStatus::Running));
+    app.sandboxes
+        .push(make_sandbox("box", SandboxStatus::Running));
     app.focus = Focus::Detail;
     seed_logs(&mut app, "box");
     render_to_string(&mut terminal, &mut app);
@@ -336,14 +371,17 @@ async fn test_render_error_notification_in_footer() {
 async fn test_render_very_small_terminal_no_panic() {
     let mut terminal = Terminal::new(TestBackend::new(20, 5)).expect("terminal");
     let mut app = make_app();
-    terminal.draw(|f| microsandbox_tui::ui::render(f, &mut app)).expect("draw");
+    terminal
+        .draw(|f| microsandbox_tui::ui::render(f, &mut app))
+        .expect("draw");
 }
 
 #[tokio::test]
 async fn test_render_all_tabs_sequentially_no_panic() {
     let mut terminal = make_terminal();
     let mut app = make_app();
-    app.sandboxes.push(make_sandbox("box", SandboxStatus::Running));
+    app.sandboxes
+        .push(make_sandbox("box", SandboxStatus::Running));
     seed_logs(&mut app, "box");
     seed_metrics(&mut app, "box");
     seed_fs(&mut app, "box");
@@ -358,8 +396,13 @@ async fn test_render_twenty_sandboxes_no_panic() {
     let mut terminal = make_terminal();
     let mut app = make_app();
     for i in 0..20 {
-        let status = if i % 2 == 0 { SandboxStatus::Running } else { SandboxStatus::Stopped };
-        app.sandboxes.push(make_sandbox(&format!("sandbox-{i:02}"), status));
+        let status = if i % 2 == 0 {
+            SandboxStatus::Running
+        } else {
+            SandboxStatus::Stopped
+        };
+        app.sandboxes
+            .push(make_sandbox(&format!("sandbox-{i:02}"), status));
     }
     seed_logs(&mut app, "sandbox-00");
     render_to_string(&mut terminal, &mut app);

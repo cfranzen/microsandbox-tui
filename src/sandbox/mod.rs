@@ -53,6 +53,24 @@ pub enum LocalFsEntryKind {
     Other,
 }
 
+/// All parameters for creating a new sandbox via the TUI dialog.
+#[derive(Debug, Clone)]
+pub struct CreateConfig {
+    pub name: String,
+    pub image: String,
+    pub cpus: u8,
+    pub memory_mib: u32,
+    pub ports: Vec<(u16, u16)>,
+    pub env_vars: Vec<(String, String)>,
+    pub hostname: Option<String>,
+    pub workdir: Option<String>,
+    pub user: Option<String>,
+    pub shell: Option<String>,
+    pub max_cpus: Option<u8>,
+    pub max_memory_mib: Option<u32>,
+    pub disable_network: bool,
+}
+
 //--------------------------------------------------------------------------------------------------
 // List
 //--------------------------------------------------------------------------------------------------
@@ -66,7 +84,11 @@ pub async fn list_sandboxes() -> Result<Vec<SandboxInfo>> {
             let image = match &cfg.spec.image {
                 img => img.oci_reference().unwrap_or("(bind/disk)").to_owned(),
             };
-            (image, cfg.spec.resources.cpus, cfg.spec.resources.memory_mib)
+            (
+                image,
+                cfg.spec.resources.cpus,
+                cfg.spec.resources.memory_mib,
+            )
         } else {
             ("—".into(), 1, 512)
         };
@@ -117,15 +139,43 @@ pub async fn remove_sandbox(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Create and immediately detach a new sandbox.
-pub async fn create_sandbox(name: &str, image: &str, cpus: u8, memory_mib: u32) -> Result<()> {
-    let sb = Sandbox::builder(name)
-        .image(image)
-        .cpus(cpus)
-        .memory(memory_mib)
-        .detached(true)
-        .create()
-        .await?;
+/// Create and immediately detach a new sandbox using the given configuration.
+pub async fn create_sandbox(cfg: &CreateConfig) -> Result<()> {
+    let mut builder = Sandbox::builder(&cfg.name)
+        .image(cfg.image.as_str())
+        .cpus(cfg.cpus)
+        .memory(cfg.memory_mib)
+        .detached(true);
+
+    for &(host_port, guest_port) in &cfg.ports {
+        builder = builder.port(host_port, guest_port);
+    }
+    for (key, value) in &cfg.env_vars {
+        builder = builder.env(key.as_str(), value.as_str());
+    }
+    if let Some(ref v) = cfg.hostname {
+        builder = builder.hostname(v.as_str());
+    }
+    if let Some(ref v) = cfg.workdir {
+        builder = builder.workdir(v.as_str());
+    }
+    if let Some(ref v) = cfg.user {
+        builder = builder.user(v.as_str());
+    }
+    if let Some(ref v) = cfg.shell {
+        builder = builder.shell(v.as_str());
+    }
+    if let Some(v) = cfg.max_cpus {
+        builder = builder.max_cpus(v);
+    }
+    if let Some(v) = cfg.max_memory_mib {
+        builder = builder.max_memory(v);
+    }
+    if cfg.disable_network {
+        builder = builder.disable_network();
+    }
+
+    let sb = builder.create().await?;
     sb.detach().await;
     Ok(())
 }
@@ -227,7 +277,6 @@ pub async fn list_fs(name: &str, path: &str) -> Result<Option<Vec<FsEntry>>> {
     Ok(Some(result))
 }
 
-
 //--------------------------------------------------------------------------------------------------
 // Tests
 //--------------------------------------------------------------------------------------------------
@@ -304,7 +353,10 @@ mod tests {
 
     #[test]
     fn test_metrics_snapshot_clone() {
-        let m = MetricsSnapshot { cpu_percent: 10.0, ..Default::default() };
+        let m = MetricsSnapshot {
+            cpu_percent: 10.0,
+            ..Default::default()
+        };
         let c = m.clone();
         assert_eq!(c.cpu_percent, 10.0);
     }
@@ -325,7 +377,11 @@ mod tests {
 
     #[test]
     fn test_fs_entry_clone() {
-        let e = FsEntry { path: "/tmp".into(), kind: LocalFsEntryKind::Directory, size: 0 };
+        let e = FsEntry {
+            path: "/tmp".into(),
+            kind: LocalFsEntryKind::Directory,
+            size: 0,
+        };
         let c = e.clone();
         assert_eq!(c.path, e.path);
         assert_eq!(c.kind, e.kind);
@@ -351,7 +407,11 @@ mod tests {
         ];
         for (i, a) in variants.iter().enumerate() {
             for (j, b) in variants.iter().enumerate() {
-                if i == j { assert_eq!(a, b); } else { assert_ne!(a, b); }
+                if i == j {
+                    assert_eq!(a, b);
+                } else {
+                    assert_ne!(a, b);
+                }
             }
         }
     }

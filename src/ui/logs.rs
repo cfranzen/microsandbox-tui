@@ -2,11 +2,11 @@
 
 use microsandbox::sandbox::LogSource;
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
+    Frame,
 };
 
 use crate::app::App;
@@ -54,17 +54,17 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
             let text = text.trim_end_matches('\n');
 
             Line::from(vec![
-                Span::styled(
-                    format!("{ts} "),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled(format!("{ts} "), Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     format!("[{badge}] "),
                     Style::default()
                         .fg(badge_color)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(text.to_string(), Style::default().fg(message_color(e.source))),
+                Span::styled(
+                    text.to_string(),
+                    Style::default().fg(message_color(e.source)),
+                ),
             ])
         })
         .collect();
@@ -84,18 +84,16 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     // Summary line count at bottom
     let count_line = format!(" {} lines ", total_lines);
 
-    let widget = Paragraph::new(lines)
-        .scroll((scroll as u16, 0))
-        .block(
-            Block::default()
-                .borders(Borders::BOTTOM)
-                .border_style(Style::default().fg(Color::DarkGray))
-                .title_bottom(Span::styled(
-                    count_line,
-                    Style::default().fg(Color::DarkGray),
-                ))
-                .title_alignment(ratatui::layout::Alignment::Right),
-        );
+    let widget = Paragraph::new(lines).scroll((scroll as u16, 0)).block(
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(Style::default().fg(Color::DarkGray))
+            .title_bottom(Span::styled(
+                count_line,
+                Style::default().fg(Color::DarkGray),
+            ))
+            .title_alignment(ratatui::layout::Alignment::Right),
+    );
 
     f.render_widget(widget, area);
 }
