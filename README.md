@@ -72,8 +72,8 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 ### Prerequisites
 
 - A recent stable Rust toolchain — install via [rustup](https://rustup.rs/)
-- A running microsandbox server (`micsb server start`)
-- The microsandbox server requires **Linux**. Building may also require `libcap-ng`:
+- The [`msb` CLI](https://docs.microsandbox.dev/cli/overview) installed and your host configured with KVM (Linux) or hardware virtualisation (macOS/Windows)
+- Building may also require `libcap-ng` on Linux:
   ```bash
   sudo apt install libcap-ng-dev    # Debian / Ubuntu
   sudo dnf install libcap-ng-devel  # Fedora / RHEL
@@ -90,17 +90,12 @@ cargo build --release
 
 ## Usage
 
-Start a microsandbox server first, then launch the TUI:
-
 ```bash
-# Start the microsandbox server (once)
-micsb server start
-
 # Launch the TUI
 microsandbox-tui
 ```
 
-The TUI connects to the local microsandbox server automatically.
+The TUI connects to the local microsandbox runtime automatically (no server process needed).
 
 ## Project Structure
 
@@ -121,70 +116,8 @@ src/
     ├── filesystem.rs    # Filesystem tab
     ├── info.rs          # Info tab
     └── create_dialog.rs # New sandbox modal + directory picker
-```
-
-## Contributing
-
-Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
-
-## License
-
-MIT — see [LICENSE](LICENSE).
-
-
-## Installation
-
-### Prerequisites
-
-- Rust 1.75 or later — install via [rustup](https://rustup.rs/)
-- A running microsandbox server (`micsb server start`)
-- **Linux only** — requires `libcap-ng`:
-  ```bash
-  sudo apt install libcap-ng-dev    # Debian / Ubuntu
-  sudo dnf install libcap-ng-devel  # Fedora / RHEL
-  ```
-
-### Build from source
-
-```bash
-git clone https://github.com/cfranzen/microsandbox-tui
-cd microsandbox-tui
-cargo build --release
-./target/release/microsandbox-tui
-```
-
-## Usage
-
-Start a microsandbox server first, then launch the TUI:
-
-```bash
-# Start the microsandbox server (once)
-micsb server start
-
-# Launch the TUI
-microsandbox-tui
-```
-
-The TUI connects to the local microsandbox server automatically.
-
-## Project Structure
-
-```
-src/
-├── main.rs             # Terminal setup/teardown, entry point
-├── app.rs              # Application state, event loop, input handling
-├── sandbox/
-│   └── mod.rs          # Async SDK wrappers (list, create, start, stop, …)
-└── ui/
-    ├── mod.rs           # Top-level render dispatcher
-    ├── layout.rs        # Header / footer / two-column split
-    ├── sandbox_list.rs  # Left panel: sandbox cards
-    ├── detail.rs        # Right panel: tab bar
-    ├── logs.rs          # Logs tab
-    ├── metrics.rs       # Metrics tab
-    ├── filesystem.rs    # Filesystem tab
-    ├── info.rs          # Info tab
-    └── create_dialog.rs # New sandbox modal
+tests/
+└── ui_rendering.rs     # Integration tests for UI rendering
 ```
 
 ## Contributing
