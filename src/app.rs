@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
-use crossterm::event::{Event, EventStream, KeyCode, KeyModifiers};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use microsandbox::sandbox::LogEntry;
 use ratatui::Terminal;
@@ -430,6 +430,11 @@ pub async fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> 
 fn handle_event(app: &mut App, event: Event) {
     let Event::Key(key) = event else { return };
 
+    // Only act on key presses (ignore repeat and release events from enhanced terminals)
+    if key.kind != KeyEventKind::Press {
+        return;
+    }
+
     // Modal dialog steals all input
     if app.create_dialog.visible {
         handle_dialog_key(app, key.code, key.modifiers);
@@ -441,6 +446,11 @@ fn handle_event(app: &mut App, event: Event) {
         KeyCode::Char('q') | KeyCode::Char('Q') => app.should_quit = true,
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.should_quit = true
+        }
+
+        // Esc: move focus back to the sandbox list from the detail panel
+        KeyCode::Esc => {
+            app.focus = Focus::SandboxList;
         }
 
         // Focus switching
