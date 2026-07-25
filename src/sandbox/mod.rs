@@ -227,3 +227,132 @@ pub async fn list_fs(name: &str, path: &str) -> Result<Option<Vec<FsEntry>>> {
     Ok(Some(result))
 }
 
+
+//--------------------------------------------------------------------------------------------------
+// Tests
+//--------------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── SandboxInfo ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_sandbox_info_construction() {
+        let info = SandboxInfo {
+            name: "mybox".into(),
+            status: SandboxStatus::Running,
+            image: "alpine:latest".into(),
+            cpus: 2,
+            memory_mib: 1024,
+            created_at: None,
+            updated_at: None,
+        };
+        assert_eq!(info.name, "mybox");
+        assert_eq!(info.status, SandboxStatus::Running);
+        assert_eq!(info.cpus, 2);
+        assert_eq!(info.memory_mib, 1024);
+        assert!(info.created_at.is_none());
+    }
+
+    #[test]
+    fn test_sandbox_info_clone() {
+        let info = SandboxInfo {
+            name: "box".into(),
+            status: SandboxStatus::Stopped,
+            image: "debian".into(),
+            cpus: 1,
+            memory_mib: 512,
+            created_at: None,
+            updated_at: None,
+        };
+        let cloned = info.clone();
+        assert_eq!(cloned.name, info.name);
+        assert_eq!(cloned.status, info.status);
+    }
+
+    // ── MetricsSnapshot ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_metrics_snapshot_default_is_zero() {
+        let m = MetricsSnapshot::default();
+        assert_eq!(m.cpu_percent, 0.0);
+        assert_eq!(m.memory_bytes, 0);
+        assert_eq!(m.disk_read_bytes, 0);
+        assert_eq!(m.disk_write_bytes, 0);
+        assert_eq!(m.net_rx_bytes, 0);
+        assert_eq!(m.net_tx_bytes, 0);
+        assert_eq!(m.uptime_secs, 0);
+    }
+
+    #[test]
+    fn test_metrics_snapshot_construction() {
+        let m = MetricsSnapshot {
+            cpu_percent: 75.5,
+            memory_bytes: 256 * 1024 * 1024,
+            disk_read_bytes: 1_000_000,
+            disk_write_bytes: 500_000,
+            net_rx_bytes: 4096,
+            net_tx_bytes: 2048,
+            uptime_secs: 3661,
+        };
+        assert!((m.cpu_percent - 75.5).abs() < f64::EPSILON);
+        assert_eq!(m.memory_bytes, 256 * 1024 * 1024);
+        assert_eq!(m.uptime_secs, 3661);
+    }
+
+    #[test]
+    fn test_metrics_snapshot_clone() {
+        let m = MetricsSnapshot { cpu_percent: 10.0, ..Default::default() };
+        let c = m.clone();
+        assert_eq!(c.cpu_percent, 10.0);
+    }
+
+    // ── FsEntry ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_fs_entry_construction() {
+        let e = FsEntry {
+            path: "/etc/passwd".into(),
+            kind: LocalFsEntryKind::File,
+            size: 1234,
+        };
+        assert_eq!(e.path, "/etc/passwd");
+        assert_eq!(e.kind, LocalFsEntryKind::File);
+        assert_eq!(e.size, 1234);
+    }
+
+    #[test]
+    fn test_fs_entry_clone() {
+        let e = FsEntry { path: "/tmp".into(), kind: LocalFsEntryKind::Directory, size: 0 };
+        let c = e.clone();
+        assert_eq!(c.path, e.path);
+        assert_eq!(c.kind, e.kind);
+    }
+
+    // ── LocalFsEntryKind ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_local_fs_entry_kind_equality() {
+        assert_eq!(LocalFsEntryKind::File, LocalFsEntryKind::File);
+        assert_ne!(LocalFsEntryKind::File, LocalFsEntryKind::Directory);
+        assert_ne!(LocalFsEntryKind::Symlink, LocalFsEntryKind::Other);
+    }
+
+    #[test]
+    fn test_all_local_fs_entry_kind_variants() {
+        // Ensure all variants exist and are distinct
+        let variants = [
+            LocalFsEntryKind::File,
+            LocalFsEntryKind::Directory,
+            LocalFsEntryKind::Symlink,
+            LocalFsEntryKind::Other,
+        ];
+        for (i, a) in variants.iter().enumerate() {
+            for (j, b) in variants.iter().enumerate() {
+                if i == j { assert_eq!(a, b); } else { assert_ne!(a, b); }
+            }
+        }
+    }
+}

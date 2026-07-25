@@ -427,7 +427,7 @@ pub async fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> 
 // Input handling
 //--------------------------------------------------------------------------------------------------
 
-fn handle_event(app: &mut App, event: Event) {
+pub(crate) fn handle_event(app: &mut App, event: Event) {
     let Event::Key(key) = event else { return };
 
     // Only act on key presses (ignore repeat and release events from enhanced terminals)
@@ -697,5 +697,803 @@ fn action_remove(app: &mut App) {
         } else {
             app.notify("Stop the sandbox before removing", true);
         }
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+// Tests
+//--------------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyEvent, KeyEventState};
+
+    // ── Helpers ─────────────────────────────────────────────────────────────
+
+    /// Build an App with a disconnected message channel (the sender is kept alive
+    /// so the channel stays open; the receiver is dropped and never polled).
+    fn make_app() -> App {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        App::new(tx)
+    }
+
+    /// Construct a sandbox info with the given name and status.
+    fn make_sandbox(name: &str, status: Status) -> SandboxInfo {
+        SandboxInfo {
+            name: name.into(),
+            status,
+            image: "alpine:latest".into(),
+            cpus: 1,
+            memory_mib: 512,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    /// Build a key-press Event.
+    fn key_press(code: KeyCode) -> Event {
+        Event::Key(KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        })
+    }
+
+    /// Build a key-press Event with modifiers.
+    fn key_press_mod(code: KeyCode, modifiers: KeyModifiers) -> Event {
+        Event::Key(KeyEvent {
+            code,
+            modifiers,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        })
+    }
+
+    /// Build a key-release Event (should be ignored by handle_event).
+    fn key_release(code: KeyCode) -> Event {
+        Event::Key(KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: KeyEventState::NONE,
+        })
+    }
+
+    // ── App initial state ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_initial_state() {
+        let app = make_app();
+        assert!(app.sandboxes.is_empty());
+        assert_eq!(app.selected, 0);
+        assert_eq!(app.focus, Focus::SandboxList);
+        assert_eq!(app.tab, DetailTab::Logs);
+        assert!(!app.should_quit);
+        assert!(!app.create_dialog.visible);
+        assert!(app.notification.is_none());
+        assert_eq!(app.fs_path, "/");
+    }
+
+    // ── selected_sandbox ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_selected_sandbox_empty() {
+        let app = make_app();
+        assert!(app.selected_sandbox().is_none());
+    }
+
+    #[test]
+    fn test_selected_sandbox_first() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("alpha", Status::Running));
+        assert_eq!(app.selected_sandbox().unwrap().name, "alpha");
+    }
+
+    #[test]
+    fn test_selected_sandbox_second() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("alpha", Status::Running));
+        app.sandboxes.push(make_sandbox("beta", Status::Stopped));
+        app.selected = 1;
+        assert_eq!(app.selected_sandbox().unwrap().name, "beta");
+    }
+
+    // ── new_sandbox_selected ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_new_sandbox_selected_empty_list() {
+        // With no sandboxes selected==0==len() → new sandbox is selected
+        let app = make_app();
+        assert!(app.new_sandbox_selected());
+    }
+
+    #[test]
+    fn test_new_sandbox_selected_false_when_sandbox_focused() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("alpha", Status::Running));
+        assert!(!app.new_sandbox_selected());
+    }
+
+    #[test]
+    fn test_new_sandbox_selected_true_at_end() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("alpha", Status::Running));
+        app.selected = 1; // == len()
+        assert!(app.new_sandbox_selected());
+    }
+
+    // ── select_next / select_prev ────────────────────────────────────────────
+
+    #[test]
+    fn test_select_next_empty_does_nothing() {
+        let mut app = make_app();
+        app.select_next();
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn test_select_next_advances() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("a", Status::Running));
+        app.sandboxes.push(make_sandbox("b", Status::Running));
+        app.select_next();
+        assert_eq!(app.selected, 1);
+    }
+
+    #[test]
+    fn test_select_next_can_reach_new_sandbox_slot() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("a", Status::Running));
+        app.select_next(); // selected = 1 == len() → "New Sandbox"
+        assert!(app.new_sandbox_selected());
+    }
+
+    #[test]
+    fn test_select_next_stops_at_new_sandbox_slot() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("a", Status::Running));
+        app.selected = 1; // already at "New Sandbox"
+        app.select_next();
+        assert_eq!(app.selected, 1); // stays
+    }
+
+    #[test]
+    fn test_select_prev_stops_at_zero() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("a", Status::Running));
+        app.select_prev(); // already at 0
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn test_select_prev_moves_back() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("a", Status::Running));
+        app.sandboxes.push(make_sandbox("b", Status::Running));
+        app.selected = 1;
+        app.select_prev();
+        assert_eq!(app.selected, 0);
+    }
+
+    // ── next_tab / prev_tab ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_next_tab_cycles_forward() {
+        let mut app = make_app();
+        assert_eq!(app.tab, DetailTab::Logs);
+        app.next_tab();
+        assert_eq!(app.tab, DetailTab::Metrics);
+        app.next_tab();
+        assert_eq!(app.tab, DetailTab::Filesystem);
+        app.next_tab();
+        assert_eq!(app.tab, DetailTab::Info);
+        app.next_tab();
+        assert_eq!(app.tab, DetailTab::Logs); // wraps
+    }
+
+    #[test]
+    fn test_prev_tab_cycles_backward() {
+        let mut app = make_app();
+        app.prev_tab();
+        assert_eq!(app.tab, DetailTab::Info); // wraps
+        app.prev_tab();
+        assert_eq!(app.tab, DetailTab::Filesystem);
+        app.prev_tab();
+        assert_eq!(app.tab, DetailTab::Metrics);
+        app.prev_tab();
+        assert_eq!(app.tab, DetailTab::Logs);
+    }
+
+    #[test]
+    fn test_tab_switch_resets_scroll() {
+        let mut app = make_app();
+        app.log_scroll = 10;
+        app.fs_scroll = 5;
+        app.next_tab();
+        assert_eq!(app.log_scroll, 0);
+        assert_eq!(app.fs_scroll, 0);
+    }
+
+    // ── notify ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_notify_sets_message() {
+        let mut app = make_app();
+        app.notify("hello", false);
+        let n = app.notification.as_ref().unwrap();
+        assert_eq!(n.message, "hello");
+        assert!(!n.is_error);
+    }
+
+    #[test]
+    fn test_notify_error_flag() {
+        let mut app = make_app();
+        app.notify("boom", true);
+        assert!(app.notification.as_ref().unwrap().is_error);
+    }
+
+    #[test]
+    fn test_notify_replaces_previous() {
+        let mut app = make_app();
+        app.notify("first", false);
+        app.notify("second", true);
+        assert_eq!(app.notification.as_ref().unwrap().message, "second");
+    }
+
+    // ── CreateDialog ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_create_dialog_default_is_closed() {
+        let dlg = CreateDialog::default();
+        assert!(!dlg.visible);
+        assert_eq!(dlg.field, 0);
+        assert!(dlg.name.is_empty());
+    }
+
+    #[test]
+    fn test_create_dialog_open_has_defaults() {
+        let dlg = CreateDialog::open();
+        assert!(dlg.visible);
+        assert_eq!(dlg.field, 0);
+        assert_eq!(dlg.image, "alpine");
+        assert_eq!(dlg.cpus, "1");
+        assert_eq!(dlg.memory, "512");
+        assert!(dlg.name.is_empty());
+        assert!(dlg.error.is_none());
+    }
+
+    #[test]
+    fn test_create_dialog_next_field_wraps() {
+        let mut dlg = CreateDialog::open();
+        dlg.next_field(); assert_eq!(dlg.field, 1);
+        dlg.next_field(); assert_eq!(dlg.field, 2);
+        dlg.next_field(); assert_eq!(dlg.field, 3);
+        dlg.next_field(); assert_eq!(dlg.field, 0); // wraps
+    }
+
+    #[test]
+    fn test_create_dialog_current_field_mut() {
+        let mut dlg = CreateDialog::open();
+        dlg.field = 0; dlg.current_field_mut().push_str("mybox"); assert_eq!(dlg.name, "mybox");
+        dlg.field = 1; dlg.current_field_mut().push_str("ubuntu"); assert_eq!(dlg.image, "alpineubuntu");
+        dlg.field = 2; dlg.current_field_mut().push_str("4"); assert_eq!(dlg.cpus, "14");
+        dlg.field = 3; dlg.current_field_mut().push_str("1024"); assert_eq!(dlg.memory, "5121024");
+    }
+
+    // ── DetailTab helpers ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_detail_tab_titles() {
+        assert_eq!(DetailTab::Logs.title(), "Logs");
+        assert_eq!(DetailTab::Metrics.title(), "Metrics");
+        assert_eq!(DetailTab::Filesystem.title(), "Filesystem");
+        assert_eq!(DetailTab::Info.title(), "Info");
+    }
+
+    #[test]
+    fn test_detail_tab_all_has_four_entries() {
+        assert_eq!(DetailTab::all().len(), 4);
+    }
+
+    // ── handle_message ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_handle_message_sandbox_list_populates() {
+        let mut app = make_app();
+        let list = vec![make_sandbox("alpha", Status::Running)];
+        app.handle_message(AppMessage::SandboxList(Ok(list)));
+        assert_eq!(app.sandboxes.len(), 1);
+        assert_eq!(app.sandboxes[0].name, "alpha");
+        assert!(app.last_refresh.is_some());
+    }
+
+    #[test]
+    fn test_handle_message_sandbox_list_error_notifies() {
+        let mut app = make_app();
+        app.handle_message(AppMessage::SandboxList(Err(anyhow::anyhow!("conn refused"))));
+        let n = app.notification.as_ref().unwrap();
+        assert!(n.is_error);
+        assert!(n.message.contains("conn refused"));
+    }
+
+    #[test]
+    fn test_handle_message_preserves_selection_by_name() {
+        let mut app = make_app();
+        app.sandboxes = vec![
+            make_sandbox("alpha", Status::Running),
+            make_sandbox("beta", Status::Stopped),
+        ];
+        app.selected = 1; // "beta"
+
+        // Refresh with beta still present but in a new position (alpha removed)
+        let new_list = vec![make_sandbox("beta", Status::Running)];
+        app.handle_message(AppMessage::SandboxList(Ok(new_list)));
+        assert_eq!(app.selected, 0); // beta moved to index 0
+        assert_eq!(app.sandboxes[app.selected].name, "beta");
+    }
+
+    #[test]
+    fn test_handle_message_selection_clamps_when_sandbox_removed() {
+        let mut app = make_app();
+        app.sandboxes = vec![
+            make_sandbox("alpha", Status::Running),
+            make_sandbox("beta", Status::Stopped),
+        ];
+        app.selected = 1; // "beta" — will be removed
+
+        let new_list = vec![make_sandbox("alpha", Status::Running)];
+        app.handle_message(AppMessage::SandboxList(Ok(new_list)));
+        // beta gone, selected should clamp to len() == 1 (new sandbox slot)
+        assert!(app.selected <= app.sandboxes.len());
+    }
+
+    #[test]
+    fn test_handle_message_log_entries_stored() {
+        let mut app = make_app();
+        app.handle_message(AppMessage::LogEntries("mybox".into(), Ok(vec![])));
+        assert!(app.logs.contains_key("mybox"));
+    }
+
+    #[test]
+    fn test_handle_message_log_error_notifies() {
+        let mut app = make_app();
+        app.handle_message(AppMessage::LogEntries("mybox".into(), Err(anyhow::anyhow!("err"))));
+        assert!(app.notification.as_ref().unwrap().is_error);
+    }
+
+    #[test]
+    fn test_handle_message_metrics_stored() {
+        let mut app = make_app();
+        let m = MetricsSnapshot { cpu_percent: 42.0, memory_bytes: 1024, ..Default::default() };
+        app.handle_message(AppMessage::Metrics("mybox".into(), Ok(Some(m))));
+        assert_eq!(app.metrics["mybox"].cpu_percent, 42.0);
+    }
+
+    #[test]
+    fn test_handle_message_metrics_none_no_panic() {
+        let mut app = make_app();
+        app.handle_message(AppMessage::Metrics("mybox".into(), Ok(None)));
+        assert!(!app.metrics.contains_key("mybox"));
+    }
+
+    #[test]
+    fn test_handle_message_metrics_error_notifies() {
+        let mut app = make_app();
+        app.handle_message(AppMessage::Metrics("mybox".into(), Err(anyhow::anyhow!("x"))));
+        assert!(app.notification.as_ref().unwrap().is_error);
+    }
+
+    #[test]
+    fn test_handle_message_fs_entries_stored() {
+        let mut app = make_app();
+        let entries = vec![crate::sandbox::FsEntry {
+            path: "/etc".into(),
+            kind: crate::sandbox::LocalFsEntryKind::Directory,
+            size: 0,
+        }];
+        app.handle_message(AppMessage::FsEntries("mybox".into(), "/".into(), Ok(Some(entries))));
+        assert!(app.fs_entries.contains_key(&("mybox".into(), "/".into())));
+    }
+
+    #[test]
+    fn test_handle_message_fs_none_no_panic() {
+        let mut app = make_app();
+        app.handle_message(AppMessage::FsEntries("mybox".into(), "/".into(), Ok(None)));
+        assert!(app.fs_entries.is_empty());
+    }
+
+    #[test]
+    fn test_handle_message_fs_error_notifies() {
+        let mut app = make_app();
+        app.handle_message(AppMessage::FsEntries("mybox".into(), "/".into(), Err(anyhow::anyhow!("x"))));
+        assert!(app.notification.as_ref().unwrap().is_error);
+    }
+
+    #[test]
+    fn test_handle_message_notification() {
+        let mut app = make_app();
+        app.handle_message(AppMessage::Notification("done".into(), false));
+        let n = app.notification.as_ref().unwrap();
+        assert_eq!(n.message, "done");
+        assert!(!n.is_error);
+    }
+
+    // ── handle_event: key-event filtering ───────────────────────────────────
+
+    #[test]
+    fn test_release_events_are_ignored() {
+        let mut app = make_app();
+        // Releasing 'q' must not quit
+        handle_event(&mut app, key_release(KeyCode::Char('q')));
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn test_non_key_events_are_ignored() {
+        let mut app = make_app();
+        handle_event(&mut app, Event::FocusGained);
+        assert!(!app.should_quit);
+    }
+
+    // ── handle_event: global keys ────────────────────────────────────────────
+
+    #[test]
+    fn test_q_quits() {
+        let mut app = make_app();
+        handle_event(&mut app, key_press(KeyCode::Char('q')));
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn test_shift_q_quits() {
+        let mut app = make_app();
+        handle_event(&mut app, key_press(KeyCode::Char('Q')));
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn test_ctrl_c_quits() {
+        let mut app = make_app();
+        handle_event(&mut app, key_press_mod(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(app.should_quit);
+    }
+
+    // ── handle_event: Esc behaviour ──────────────────────────────────────────
+
+    #[test]
+    fn test_esc_closes_dialog() {
+        let mut app = make_app();
+        app.create_dialog = CreateDialog::open();
+        assert!(app.create_dialog.visible);
+        handle_event(&mut app, key_press(KeyCode::Esc));
+        assert!(!app.create_dialog.visible);
+    }
+
+    #[test]
+    fn test_esc_does_not_quit() {
+        let mut app = make_app();
+        app.create_dialog = CreateDialog::open();
+        handle_event(&mut app, key_press(KeyCode::Esc));
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn test_esc_outside_dialog_moves_focus_to_list() {
+        let mut app = make_app();
+        app.focus = Focus::Detail;
+        handle_event(&mut app, key_press(KeyCode::Esc));
+        assert_eq!(app.focus, Focus::SandboxList);
+    }
+
+    // ── handle_event: dialog input ───────────────────────────────────────────
+
+    #[test]
+    fn test_dialog_tab_advances_field() {
+        let mut app = make_app();
+        app.create_dialog = CreateDialog::open();
+        handle_event(&mut app, key_press(KeyCode::Tab));
+        assert_eq!(app.create_dialog.field, 1);
+    }
+
+    #[test]
+    fn test_dialog_backtab_goes_back() {
+        let mut app = make_app();
+        app.create_dialog = CreateDialog::open();
+        app.create_dialog.field = 2;
+        handle_event(&mut app, key_press(KeyCode::BackTab));
+        assert_eq!(app.create_dialog.field, 1);
+    }
+
+    #[test]
+    fn test_dialog_backtab_from_first_wraps_to_last() {
+        let mut app = make_app();
+        app.create_dialog = CreateDialog::open();
+        // field == 0
+        handle_event(&mut app, key_press(KeyCode::BackTab));
+        assert_eq!(app.create_dialog.field, 3);
+    }
+
+    #[test]
+    fn test_dialog_char_appends_to_field() {
+        let mut app = make_app();
+        app.create_dialog = CreateDialog::open();
+        app.create_dialog.field = 0; // name
+        handle_event(&mut app, key_press(KeyCode::Char('x')));
+        assert_eq!(app.create_dialog.name, "x");
+    }
+
+    #[test]
+    fn test_dialog_backspace_removes_char() {
+        let mut app = make_app();
+        app.create_dialog = CreateDialog::open();
+        app.create_dialog.name = "ab".into();
+        handle_event(&mut app, key_press(KeyCode::Backspace));
+        assert_eq!(app.create_dialog.name, "a");
+    }
+
+    #[test]
+    fn test_dialog_enter_with_empty_name_sets_error() {
+        let mut app = make_app();
+        app.create_dialog = CreateDialog::open();
+        app.create_dialog.name = "".into();
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        assert!(app.create_dialog.error.is_some());
+        // Dialog stays open on validation error
+        assert!(app.create_dialog.visible);
+    }
+
+    #[test]
+    fn test_dialog_enter_with_empty_image_sets_error() {
+        let mut app = make_app();
+        app.create_dialog = CreateDialog::open();
+        app.create_dialog.name = "mybox".into();
+        app.create_dialog.image = "".into();
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        assert!(app.create_dialog.error.is_some());
+        assert!(app.create_dialog.visible);
+    }
+
+    // ── handle_event: focus & navigation ────────────────────────────────────
+
+    #[test]
+    fn test_tab_switches_focus_list_to_detail() {
+        let mut app = make_app();
+        assert_eq!(app.focus, Focus::SandboxList);
+        handle_event(&mut app, key_press(KeyCode::Tab));
+        assert_eq!(app.focus, Focus::Detail);
+    }
+
+    #[test]
+    fn test_tab_switches_focus_detail_to_list() {
+        let mut app = make_app();
+        app.focus = Focus::Detail;
+        handle_event(&mut app, key_press(KeyCode::Tab));
+        assert_eq!(app.focus, Focus::SandboxList);
+    }
+
+    #[test]
+    fn test_n_opens_dialog() {
+        let mut app = make_app();
+        handle_event(&mut app, key_press(KeyCode::Char('n')));
+        assert!(app.create_dialog.visible);
+    }
+
+    #[tokio::test]
+    async fn test_down_moves_selection_in_list() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("a", Status::Running));
+        app.sandboxes.push(make_sandbox("b", Status::Running));
+        handle_event(&mut app, key_press(KeyCode::Down));
+        assert_eq!(app.selected, 1);
+    }
+
+    #[tokio::test]
+    async fn test_j_moves_selection_in_list() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("a", Status::Running));
+        app.sandboxes.push(make_sandbox("b", Status::Running));
+        handle_event(&mut app, key_press(KeyCode::Char('j')));
+        assert_eq!(app.selected, 1);
+    }
+
+    #[tokio::test]
+    async fn test_up_moves_selection_in_list() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("a", Status::Running));
+        app.sandboxes.push(make_sandbox("b", Status::Running));
+        app.selected = 1;
+        handle_event(&mut app, key_press(KeyCode::Up));
+        assert_eq!(app.selected, 0);
+    }
+
+    #[tokio::test]
+    async fn test_k_moves_selection_in_list() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("a", Status::Running));
+        app.sandboxes.push(make_sandbox("b", Status::Running));
+        app.selected = 1;
+        handle_event(&mut app, key_press(KeyCode::Char('k')));
+        assert_eq!(app.selected, 0);
+    }
+
+    #[tokio::test]
+    async fn test_right_advances_tab_in_detail_focus() {
+        let mut app = make_app();
+        app.focus = Focus::Detail;
+        handle_event(&mut app, key_press(KeyCode::Right));
+        assert_eq!(app.tab, DetailTab::Metrics);
+    }
+
+    #[tokio::test]
+    async fn test_l_advances_tab_in_detail_focus() {
+        let mut app = make_app();
+        app.focus = Focus::Detail;
+        handle_event(&mut app, key_press(KeyCode::Char('l')));
+        assert_eq!(app.tab, DetailTab::Metrics);
+    }
+
+    #[tokio::test]
+    async fn test_left_goes_back_tab_in_detail_focus() {
+        let mut app = make_app();
+        app.focus = Focus::Detail;
+        app.tab = DetailTab::Metrics;
+        handle_event(&mut app, key_press(KeyCode::Left));
+        assert_eq!(app.tab, DetailTab::Logs);
+    }
+
+    #[test]
+    fn test_right_does_nothing_in_list_focus() {
+        let mut app = make_app();
+        assert_eq!(app.focus, Focus::SandboxList);
+        handle_event(&mut app, key_press(KeyCode::Right));
+        assert_eq!(app.tab, DetailTab::Logs); // unchanged
+    }
+
+    #[tokio::test]
+    async fn test_enter_on_sandbox_moves_focus_to_detail() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("a", Status::Running));
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        assert_eq!(app.focus, Focus::Detail);
+    }
+
+    #[test]
+    fn test_enter_on_new_sandbox_opens_dialog() {
+        let mut app = make_app();
+        // selected == 0 == len() → new sandbox slot
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        assert!(app.create_dialog.visible);
+    }
+
+    // ── handle_event: sandbox actions ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_s_start_notifies_when_sandbox_stopped() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box1", Status::Stopped));
+        handle_event(&mut app, key_press(KeyCode::Char('s')));
+        let n = app.notification.as_ref().unwrap();
+        assert!(!n.is_error);
+        assert!(n.message.contains("box1"));
+    }
+
+    #[tokio::test]
+    async fn test_s_start_notifies_error_when_sandbox_running() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box1", Status::Running));
+        handle_event(&mut app, key_press(KeyCode::Char('s')));
+        let n = app.notification.as_ref().unwrap();
+        assert!(n.is_error);
+    }
+
+    #[tokio::test]
+    async fn test_shift_s_stop_notifies_when_sandbox_running() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box1", Status::Running));
+        handle_event(&mut app, key_press(KeyCode::Char('S')));
+        let n = app.notification.as_ref().unwrap();
+        assert!(!n.is_error);
+        assert!(n.message.contains("box1"));
+    }
+
+    #[tokio::test]
+    async fn test_shift_s_stop_error_when_sandbox_stopped() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box1", Status::Stopped));
+        handle_event(&mut app, key_press(KeyCode::Char('S')));
+        assert!(app.notification.as_ref().unwrap().is_error);
+    }
+
+    #[tokio::test]
+    async fn test_d_remove_notifies_when_sandbox_stopped() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box1", Status::Stopped));
+        handle_event(&mut app, key_press(KeyCode::Char('d')));
+        let n = app.notification.as_ref().unwrap();
+        assert!(!n.is_error);
+        assert!(n.message.contains("box1"));
+    }
+
+    #[tokio::test]
+    async fn test_d_remove_error_when_sandbox_running() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box1", Status::Running));
+        handle_event(&mut app, key_press(KeyCode::Char('d')));
+        assert!(app.notification.as_ref().unwrap().is_error);
+    }
+
+    #[tokio::test]
+    async fn test_actions_ignored_in_detail_focus() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box1", Status::Stopped));
+        app.focus = Focus::Detail;
+        // 's' in detail focus should not produce a notification
+        handle_event(&mut app, key_press(KeyCode::Char('s')));
+        assert!(app.notification.is_none());
+    }
+
+    // ── scroll helpers ───────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_down_scrolls_logs_in_detail_focus() {
+        let mut app = make_app();
+        app.focus = Focus::Detail;
+        app.tab = DetailTab::Logs;
+        handle_event(&mut app, key_press(KeyCode::Down));
+        assert!(app.log_scroll > 0);
+    }
+
+    #[tokio::test]
+    async fn test_up_scrolls_logs_in_detail_focus() {
+        let mut app = make_app();
+        app.focus = Focus::Detail;
+        app.tab = DetailTab::Logs;
+        app.log_scroll = 6;
+        handle_event(&mut app, key_press(KeyCode::Up));
+        assert_eq!(app.log_scroll, 3);
+    }
+
+    #[tokio::test]
+    async fn test_up_scroll_does_not_underflow() {
+        let mut app = make_app();
+        app.focus = Focus::Detail;
+        app.tab = DetailTab::Logs;
+        app.log_scroll = 0;
+        handle_event(&mut app, key_press(KeyCode::Up));
+        assert_eq!(app.log_scroll, 0);
+    }
+
+    #[tokio::test]
+    async fn test_backspace_navigates_fs_up() {
+        let mut app = make_app();
+        app.focus = Focus::Detail;
+        app.tab = DetailTab::Filesystem;
+        app.fs_path = "/usr/local".into();
+        handle_event(&mut app, key_press(KeyCode::Backspace));
+        assert_eq!(app.fs_path, "/usr");
+    }
+
+    #[tokio::test]
+    async fn test_backspace_at_root_stays_at_root() {
+        let mut app = make_app();
+        app.focus = Focus::Detail;
+        app.tab = DetailTab::Filesystem;
+        app.fs_path = "/".into();
+        handle_event(&mut app, key_press(KeyCode::Backspace));
+        // parent of "/" is "" which becomes "/"
+        assert_eq!(app.fs_path, "/");
+    }
+
+    // ── r refresh key ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_r_shows_refreshing_notification() {
+        let mut app = make_app();
+        handle_event(&mut app, key_press(KeyCode::Char('r')));
+        let n = app.notification.as_ref().unwrap();
+        assert!(!n.is_error);
+        assert!(n.message.contains("efresh"));
     }
 }
