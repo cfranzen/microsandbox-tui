@@ -4,8 +4,6 @@ A terminal user interface for managing [MicroSandboxes](https://microsandbox.dev
 lightweight microVM sandboxes — built with [ratatui](https://ratatui.rs/) and the
 official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 
-![Screenshot](screenshot.png)
-
 ## Features
 
 - **Sandbox list** — colour-coded status cards (🟢 running · 🟡 stopped · 🔴 crashed)
@@ -18,10 +16,16 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 - **Filesystem tab** — browse the sandbox filesystem; navigate into directories with
   `Enter`, go up with `Backspace`
 - **Info tab** — full sandbox configuration (image, CPUs, memory, timestamps)
-- **Create dialog** — modal form with validation for creating new sandboxes
+- **Create dialog** — two-tab modal covering all
+  [SandboxConfig](https://docs.microsandbox.dev/sdk/rust/sandbox#sandboxconfig) options:
+  - **Basic tab**: Name, Image, CPUs, Memory, Port mappings, Environment variables,
+    Working directory (with interactive directory picker)
+  - **Advanced tab**: Hostname, User, Shell, Max CPUs, Max Memory, Disable network toggle
 - **Auto-refresh** — sandbox list and detail data refresh automatically every 3 seconds
 
 ## Keyboard Shortcuts
+
+### Main view
 
 | Key | Action |
 |-----|--------|
@@ -38,7 +42,92 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 | `d` | Remove selected sandbox |
 | `r` | Force refresh |
 | `Backspace` | Navigate up one directory (Filesystem tab) |
+
+### Create dialog
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `↑↓` | Move between fields |
+| `◄` / `►` | Switch between Basic and Advanced tabs |
+| `Space` | Toggle boolean fields (e.g. Disable Network) |
+| `Ctrl-F` | Open directory picker (Workdir field) |
+| `Enter` | Create sandbox |
 | `Esc` | Close dialog |
+
+### Directory picker
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Navigate entries |
+| `Enter` | Descend into directory |
+| `Space` | Confirm current directory as workdir |
+| `/` | Open drive / root selector |
+| `~` | Jump to home directory |
+| `Esc` | Close picker (returns to create dialog) |
+
+## Installation
+
+### Prerequisites
+
+- Rust 1.75 or later — install via [rustup](https://rustup.rs/)
+- A running microsandbox server (`micsb server start`)
+- **Linux only** — requires `libcap-ng`:
+  ```bash
+  sudo apt install libcap-ng-dev    # Debian / Ubuntu
+  sudo dnf install libcap-ng-devel  # Fedora / RHEL
+  ```
+
+### Build from source
+
+```bash
+git clone https://github.com/cfranzen/microsandbox-tui
+cd microsandbox-tui
+cargo build --release
+./target/release/microsandbox-tui
+```
+
+## Usage
+
+Start a microsandbox server first, then launch the TUI:
+
+```bash
+# Start the microsandbox server (once)
+micsb server start
+
+# Launch the TUI
+microsandbox-tui
+```
+
+The TUI connects to the local microsandbox server automatically.
+
+## Project Structure
+
+```
+src/
+├── main.rs             # Terminal setup/teardown, entry point
+├── app.rs              # Application state, event loop, input handling
+├── sandbox/
+│   └── mod.rs          # Async SDK wrappers (list, create, start, stop, …)
+└── ui/
+    ├── mod.rs           # Top-level render dispatcher
+    ├── layout.rs        # Header / footer / two-column split
+    ├── sandbox_list.rs  # Left panel: sandbox cards
+    ├── detail.rs        # Right panel: tab bar
+    ├── logs.rs          # Logs tab
+    ├── metrics.rs       # Metrics tab
+    ├── filesystem.rs    # Filesystem tab
+    ├── info.rs          # Info tab
+    └── create_dialog.rs # New sandbox modal + directory picker
+```
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
 
 ## Installation
 
