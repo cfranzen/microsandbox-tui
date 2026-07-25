@@ -29,25 +29,27 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 
 | Key | Action |
 |-----|--------|
-| `q` / `Ctrl-c` | Quit |
-| `↑` / `k` | Move up in list / scroll up in detail |
-| `↓` / `j` | Move down in list / scroll down in detail |
-| `Tab` | Switch focus between list and detail panel |
-| `←` / `h` | Previous detail tab |
-| `→` / `l` | Next detail tab |
-| `n` / `Enter` | Open "New Sandbox" dialog |
-| `s` | Start selected sandbox |
-| `S` | Stop selected sandbox |
-| `K` | Kill selected sandbox (SIGKILL) |
-| `d` | Remove selected sandbox |
+| `q` / `Q` / `Ctrl-c` | Quit |
+| `↑` / `k` | Move up in list / scroll up in detail panel |
+| `↓` / `j` | Move down in list / scroll down in detail panel |
+| `Tab` | Switch focus between sandbox list and detail panel |
+| `Esc` | Return focus to sandbox list |
+| `←` / `h` | Previous detail tab *(detail panel focus only)* |
+| `→` / `l` | Next detail tab *(detail panel focus only)* |
+| `Enter` | Open "New Sandbox" dialog (when placeholder is selected) or switch focus to detail panel |
+| `n` | Open "New Sandbox" dialog |
+| `s` | Start selected sandbox *(list focus only)* |
+| `S` | Stop selected sandbox *(list focus only)* |
+| `K` | Kill selected sandbox (SIGKILL) *(list focus only)* |
+| `d` | Remove selected sandbox *(list focus only)* |
 | `r` | Force refresh |
-| `Backspace` | Navigate up one directory (Filesystem tab) |
+| `Backspace` | Navigate up one directory *(Filesystem tab only)* |
 
 ### Create dialog
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `↑↓` | Move between fields |
+| `Tab` / `↑` / `↓` | Move between fields |
 | `◄` / `►` | Switch between Basic and Advanced tabs |
 | `Space` | Toggle boolean fields (e.g. Disable Network) |
 | `Ctrl-F` | Open directory picker (Workdir field) |
@@ -69,9 +71,9 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 
 ### Prerequisites
 
-- Rust 1.75 or later — install via [rustup](https://rustup.rs/)
+- A recent stable Rust toolchain — install via [rustup](https://rustup.rs/)
 - A running microsandbox server (`micsb server start`)
-- **Linux only** — requires `libcap-ng`:
+- The microsandbox server requires **Linux**. Building may also require `libcap-ng`:
   ```bash
   sudo apt install libcap-ng-dev    # Debian / Ubuntu
   sudo dnf install libcap-ng-devel  # Fedora / RHEL
@@ -105,6 +107,7 @@ The TUI connects to the local microsandbox server automatically.
 ```
 src/
 ├── main.rs             # Terminal setup/teardown, entry point
+├── lib.rs              # Library crate root (exposes modules for integration tests)
 ├── app.rs              # Application state, event loop, input handling
 ├── sandbox/
 │   └── mod.rs          # Async SDK wrappers (list, create, start, stop, …)
