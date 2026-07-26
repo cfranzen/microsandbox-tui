@@ -4,11 +4,12 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, Paragraph},
+    widgets::{Block, Borders, Gauge, Paragraph, Sparkline},
     Frame,
 };
 
 use crate::app::App;
+use crate::sandbox::MetricsSnapshot;
 
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let name = match app.selected_sandbox() {
@@ -48,15 +49,20 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     let m = metrics.unwrap_or_default();
+    let history: Vec<MetricsSnapshot> = app
+        .metrics_history
+        .get(&name)
+        .map(|h| h.iter().cloned().collect())
+        .unwrap_or_default();
 
-    // Layout: 8 rows of metric widgets
+    // Layout: 8 rows of metric widgets + two history sparklines
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // CPU gauge
-            Constraint::Length(1), // spacer
+            Constraint::Length(4), // CPU history sparkline
             Constraint::Length(3), // Memory gauge
-            Constraint::Length(1), // spacer
+            Constraint::Length(4), // Memory history sparkline
             Constraint::Length(1), // Disk I/O
             Constraint::Length(1), // Network I/O
             Constraint::Length(1), // Uptime
@@ -81,6 +87,15 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         chunks[0],
     );
 
+    render_sparkline(
+        f,
+        " CPU history ",
+        history
+            .iter()
+            .map(|s| s.cpu_percent.clamp(0.0, 100.0) as u64),
+        chunks[1],
+    );
+
     // --- Memory gauge ---
     let mem_total_mib = sb_info.memory_mib as u64;
     let mem_used_mib = m.memory_bytes / 1_048_576;
@@ -102,6 +117,17 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
             .percent(mem_pct as u16)
             .label(format!("{} / {} MiB", mem_used_mib, mem_total_mib)),
         chunks[2],
+    );
+
+    render_sparkline(
+        f,
+        " Memory history (MiB) ",
+        history
+            .iter()
+            .map(|s| s.memory_bytes / 1_048_576)
+            .collect::<Vec<_>>()
+            .into_iter(),
+        chunks[3],
     );
 
     // --- Disk I/O ---
@@ -160,6 +186,30 @@ fn gauge_color(pct: f64) -> Color {
     } else {
         Color::Green
     }
+}
+
+/// Render a labelled sparkline of recent samples for one metric.
+fn render_sparkline(f: &mut Frame, title: &str, data: impl Iterator<Item = u64>, area: Rect) {
+    let samples: Vec<u64> = data.collect();
+    let block = Block::default()
+        .title(Span::styled(
+            title.to_owned(),
+            Style::default().fg(Color::DarkGray),
+        ))
+        .borders(Borders::LEFT | Borders::RIGHT);
+
+    if samples.is_empty() {
+        f.render_widget(block, area);
+        return;
+    }
+
+    f.render_widget(
+        Sparkline::default()
+            .block(block)
+            .data(&samples)
+            .style(Style::default().fg(Color::Cyan)),
+        area,
+    );
 }
 
 fn fmt_bytes(bytes: u64) -> String {

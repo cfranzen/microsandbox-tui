@@ -22,6 +22,8 @@ use crate::ui;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 /// Maximum log lines kept in memory per sandbox.
 const MAX_LOG_LINES: usize = 500;
+/// Number of samples kept per sandbox for the metrics history sparklines.
+const METRICS_HISTORY_LEN: usize = 60;
 
 //--------------------------------------------------------------------------------------------------
 // Types
@@ -415,6 +417,10 @@ pub struct App {
     pub logs: std::collections::HashMap<String, Vec<LogEntry>>,
     /// Cached metrics keyed by sandbox name.
     pub metrics: std::collections::HashMap<String, MetricsSnapshot>,
+    /// Rolling history of recent metrics samples per sandbox, used to draw
+    /// the CPU/memory sparklines. Capped at [`METRICS_HISTORY_LEN`] entries.
+    pub metrics_history:
+        std::collections::HashMap<String, std::collections::VecDeque<MetricsSnapshot>>,
     /// Cached filesystem listing keyed by (name, path).
     pub fs_entries: std::collections::HashMap<(String, String), Vec<FsEntry>>,
     /// Current filesystem path being browsed.
@@ -450,6 +456,7 @@ impl App {
             fs_scroll: 0,
             logs: Default::default(),
             metrics: Default::default(),
+            metrics_history: Default::default(),
             fs_entries: Default::default(),
             fs_path: "/".into(),
             create_dialog: Default::default(),
@@ -696,6 +703,11 @@ impl App {
                 }
             }
             AppMessage::Metrics(name, Ok(Some(m))) => {
+                let history = self.metrics_history.entry(name.clone()).or_default();
+                history.push_back(m.clone());
+                if history.len() > METRICS_HISTORY_LEN {
+                    history.pop_front();
+                }
                 self.metrics.insert(name, m);
             }
             AppMessage::Metrics(_, Ok(None)) => {}
@@ -1690,6 +1702,34 @@ mod tests {
             app.handle_message(AppMessage::LogStreamEntry("alpha".into(), entry));
         }
         assert_eq!(app.logs.get("alpha").map(|v| v.len()), Some(MAX_LOG_LINES));
+    }
+
+    // ── metrics history ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_handle_message_metrics_appends_history() {
+        let mut app = make_app();
+        for i in 0..3 {
+            let m = MetricsSnapshot {
+                cpu_percent: i as f64,
+                ..Default::default()
+            };
+            app.handle_message(AppMessage::Metrics("alpha".into(), Ok(Some(m))));
+        }
+        let history = app.metrics_history.get("alpha").unwrap();
+        assert_eq!(history.len(), 3);
+        assert_eq!(history.back().unwrap().cpu_percent, 2.0);
+    }
+
+    #[test]
+    fn test_handle_message_metrics_history_caps_at_limit() {
+        let mut app = make_app();
+        for _ in 0..(METRICS_HISTORY_LEN + 15) {
+            let m = MetricsSnapshot::default();
+            app.handle_message(AppMessage::Metrics("alpha".into(), Ok(Some(m))));
+        }
+        let history = app.metrics_history.get("alpha").unwrap();
+        assert_eq!(history.len(), METRICS_HISTORY_LEN);
     }
 
     // ── select_next / select_prev ────────────────────────────────────────────

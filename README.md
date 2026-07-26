@@ -13,7 +13,8 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 - **Logs tab** — scrollable, colour-coded log output by source (stdout / stderr / pty /
   system); live-tails new output for running sandboxes via the SDK's log-streaming API
   (falls back to a one-shot read for stopped sandboxes)
-- **Metrics tab** — live CPU and memory gauges, disk I/O counters, network rx/tx, uptime
+- **Metrics tab** — live CPU and memory gauges, disk I/O counters, network rx/tx, uptime,
+  plus rolling sparkline history (last 60 samples) for CPU % and memory usage
 - **Filesystem tab** — browse the sandbox filesystem; navigate into directories with
   `Enter`, go up with `Backspace`
 - **Info tab** — full sandbox configuration (image, CPUs, memory, timestamps)

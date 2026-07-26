@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `logs()` read. The stream task is started/stopped automatically as the
   selection or active tab changes, so no background tasks leak across
   refreshes.
+- Metrics history sparklines: the Metrics tab keeps a rolling history (last
+  60 samples) of CPU % and memory usage per sandbox and renders it as a
+  `Sparkline` below each gauge.
 
 ## [0.1.0] - 2026-07-25
 
