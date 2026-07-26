@@ -12,8 +12,8 @@ use ratatui::Terminal;
 use tokio::sync::mpsc;
 
 use crate::sandbox::{
-    FsEntry, MetricsSnapshot, NetRuleAction, NetRuleDirection, NetworkRule, SandboxInfo,
-    SandboxStatus as Status,
+    FsEntry, MetricsSnapshot, MountSource, NetRuleAction, NetRuleDirection, NetworkRule,
+    SandboxInfo, SandboxStatus as Status, VolumeInfo, VolumeMountConfig,
 };
 use crate::ui;
 
@@ -294,6 +294,50 @@ impl NetworkRulesDialog {
     }
 }
 
+/// Which source kind is focused while adding a mount entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MountKindChoice {
+    #[default]
+    Bind,
+    Named,
+}
+
+/// Sub-dialog for managing volume mounts on the create-sandbox dialog.
+///
+/// Mounts can only be configured at sandbox-creation time (the SDK's
+/// `SandboxModificationBuilder` has no field for it), so this dialog is only
+/// reachable from the create-sandbox dialog's Basic tab.
+#[derive(Debug, Clone, Default)]
+pub struct MountsDialog {
+    pub visible: bool,
+    /// Confirmed mounts.
+    pub entries: Vec<VolumeMountConfig>,
+    /// Selected entry index (List mode).
+    pub selected: usize,
+    pub mode: SubDialogMode,
+    /// Guest path input buffer (Add mode).
+    pub guest_input: String,
+    /// Host path (Bind) or volume name (Named) input buffer (Add mode).
+    pub source_input: String,
+    /// Which mount source kind is being configured (Add mode).
+    pub kind: MountKindChoice,
+    /// Focused input index in Add mode: 0 = guest path, 1 = source.
+    pub add_field: usize,
+    pub error: Option<String>,
+}
+
+impl MountsDialog {
+    pub fn open(entries: Vec<VolumeMountConfig>) -> Self {
+        let selected = entries.len().saturating_sub(1);
+        Self {
+            visible: true,
+            entries,
+            selected,
+            ..Default::default()
+        }
+    }
+}
+
 /// State of the "create new sandbox" modal dialog.
 #[derive(Debug, Clone, Default)]
 pub struct CreateDialog {
@@ -328,6 +372,10 @@ pub struct CreateDialog {
     pub network_rules: Vec<NetworkRule>,
     /// Sub-dialog for managing network policy rules.
     pub network_rules_dialog: NetworkRulesDialog,
+    /// Volume mounts, applied at creation time only.
+    pub mounts: Vec<VolumeMountConfig>,
+    /// Sub-dialog for managing volume mounts.
+    pub mounts_dialog: MountsDialog,
 }
 
 impl CreateDialog {
@@ -344,7 +392,7 @@ impl CreateDialog {
 
     pub fn form_field_count(&self) -> usize {
         match self.tab {
-            DialogTab::Basic => 7,    // name image cpus memory ports env_vars workdir
+            DialogTab::Basic => 8, // name image cpus memory ports env_vars workdir mounts
             DialogTab::Advanced => 7, // hostname user shell max_cpus max_memory no_net net_rules
         }
     }
@@ -439,6 +487,34 @@ pub enum AppMessage {
     Metrics(String, Result<Option<MetricsSnapshot>>),
     FsEntries(String, String, Result<Option<Vec<FsEntry>>>),
     Notification(String, bool),
+    /// Result of refreshing the named-volumes list.
+    VolumeList(Result<Vec<VolumeInfo>>),
+}
+
+/// State of the top-level "Volumes" management view.
+///
+/// Volumes are managed directly against the SDK (not tied to any particular
+/// sandbox), reached via the `v` key from the main view.
+#[derive(Debug, Clone, Default)]
+pub struct VolumesView {
+    pub visible: bool,
+    pub volumes: Vec<VolumeInfo>,
+    pub selected: usize,
+    pub mode: SubDialogMode,
+    /// Name input buffer (Add mode).
+    pub name_input: String,
+    /// Whether the volume being created is disk-backed (vs. directory).
+    pub disk: bool,
+    pub error: Option<String>,
+}
+
+impl VolumesView {
+    pub fn open() -> Self {
+        Self {
+            visible: true,
+            ..Default::default()
+        }
+    }
 }
 
 /// Central application state.
@@ -469,6 +545,8 @@ pub struct App {
     pub fs_path: String,
     /// Create sandbox dialog state.
     pub create_dialog: CreateDialog,
+    /// Named-volumes management view state.
+    pub volumes_view: VolumesView,
     /// Transient notification shown at the bottom.
     pub notification: Option<Notification>,
     /// True when the user has requested quit.
@@ -502,6 +580,7 @@ impl App {
             fs_entries: Default::default(),
             fs_path: "/".into(),
             create_dialog: Default::default(),
+            volumes_view: Default::default(),
             notification: None,
             should_quit: false,
             last_refresh: None,
@@ -766,6 +845,15 @@ impl App {
             AppMessage::Notification(msg, is_err) => {
                 self.notify(msg, is_err);
             }
+            AppMessage::VolumeList(Ok(list)) => {
+                self.volumes_view.volumes = list;
+                if self.volumes_view.selected >= self.volumes_view.volumes.len() {
+                    self.volumes_view.selected = self.volumes_view.volumes.len().saturating_sub(1);
+                }
+            }
+            AppMessage::VolumeList(Err(e)) => {
+                self.notify(format!("Volume list error: {e}"), true);
+            }
         }
     }
 }
@@ -874,9 +962,17 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
             handle_env_vars_dialog_key(app, key.code, key.modifiers);
         } else if app.create_dialog.network_rules_dialog.visible {
             handle_network_rules_dialog_key(app, key.code, key.modifiers);
+        } else if app.create_dialog.mounts_dialog.visible {
+            handle_mounts_dialog_key(app, key.code, key.modifiers);
         } else {
             handle_dialog_key(app, key.code, key.modifiers);
         }
+        return;
+    }
+
+    // The Volumes view is a separate top-level modal.
+    if app.volumes_view.visible {
+        handle_volumes_view_key(app, key.code, key.modifiers);
         return;
     }
 
@@ -951,6 +1047,10 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
         KeyCode::Char('n') => {
             app.create_dialog = CreateDialog::open();
         }
+        KeyCode::Char('v') => {
+            app.volumes_view = VolumesView::open();
+            request_volume_refresh(app);
+        }
         KeyCode::Char('r') => {
             app.request_refresh();
             app.notify("Refreshing…", false);
@@ -1001,6 +1101,9 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
             } else if dlg.tab == DialogTab::Advanced && dlg.field == 6 {
                 let entries = app.create_dialog.network_rules.clone();
                 app.create_dialog.network_rules_dialog = NetworkRulesDialog::open(entries);
+            } else if dlg.tab == DialogTab::Basic && dlg.field == 7 {
+                let entries = app.create_dialog.mounts.clone();
+                app.create_dialog.mounts_dialog = MountsDialog::open(entries);
             }
             // Enter on plain text fields moves to next field.
             else {
@@ -1018,7 +1121,7 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                 return;
             }
             // Managed fields (ports, env vars, workdir) don't accept direct text input.
-            if app.create_dialog.tab == DialogTab::Basic && matches!(app.create_dialog.field, 4..=6)
+            if app.create_dialog.tab == DialogTab::Basic && matches!(app.create_dialog.field, 4..=7)
             {
                 return;
             }
@@ -1435,6 +1538,211 @@ fn handle_network_rules_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModif
     }
 }
 
+fn handle_mounts_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+    match app.create_dialog.mounts_dialog.mode {
+        SubDialogMode::List => match code {
+            KeyCode::Esc | KeyCode::Enter => {
+                // Sync confirmed entries back to the parent field and close.
+                let entries = app.create_dialog.mounts_dialog.entries.clone();
+                app.create_dialog.mounts = entries;
+                app.create_dialog.mounts_dialog.visible = false;
+            }
+            KeyCode::Up => {
+                if app.create_dialog.mounts_dialog.selected > 0 {
+                    app.create_dialog.mounts_dialog.selected -= 1;
+                }
+            }
+            KeyCode::Down => {
+                let len = app.create_dialog.mounts_dialog.entries.len();
+                if len > 0 && app.create_dialog.mounts_dialog.selected + 1 < len {
+                    app.create_dialog.mounts_dialog.selected += 1;
+                }
+            }
+            KeyCode::Char('a') | KeyCode::Char('A') => {
+                let dialog = &mut app.create_dialog.mounts_dialog;
+                dialog.mode = SubDialogMode::Add;
+                dialog.guest_input.clear();
+                dialog.source_input.clear();
+                dialog.kind = MountKindChoice::Bind;
+                dialog.add_field = 0;
+                dialog.error = None;
+            }
+            KeyCode::Char('d') | KeyCode::Delete => {
+                let dialog = &mut app.create_dialog.mounts_dialog;
+                if !dialog.entries.is_empty() {
+                    dialog.entries.remove(dialog.selected);
+                    if dialog.selected >= dialog.entries.len() && dialog.selected > 0 {
+                        dialog.selected -= 1;
+                    }
+                    dialog.error = None;
+                }
+            }
+            _ => {}
+        },
+        SubDialogMode::Add => match code {
+            KeyCode::Esc => {
+                app.create_dialog.mounts_dialog.mode = SubDialogMode::List;
+                app.create_dialog.mounts_dialog.error = None;
+            }
+            KeyCode::Tab | KeyCode::Down => {
+                let f = app.create_dialog.mounts_dialog.add_field;
+                app.create_dialog.mounts_dialog.add_field = (f + 1) % 2;
+            }
+            KeyCode::BackTab | KeyCode::Up => {
+                let f = app.create_dialog.mounts_dialog.add_field;
+                app.create_dialog.mounts_dialog.add_field = (f + 1) % 2;
+            }
+            KeyCode::Char('b') | KeyCode::Char('B')
+                if app.create_dialog.mounts_dialog.add_field == 1 =>
+            {
+                app.create_dialog.mounts_dialog.kind = MountKindChoice::Bind;
+            }
+            KeyCode::Char('n') | KeyCode::Char('N')
+                if app.create_dialog.mounts_dialog.add_field == 1 =>
+            {
+                app.create_dialog.mounts_dialog.kind = MountKindChoice::Named;
+            }
+            KeyCode::Backspace => {
+                let dialog = &mut app.create_dialog.mounts_dialog;
+                if dialog.add_field == 0 {
+                    dialog.guest_input.pop();
+                } else {
+                    dialog.source_input.pop();
+                }
+                dialog.error = None;
+            }
+            KeyCode::Enter => {
+                let dialog = &mut app.create_dialog.mounts_dialog;
+                if dialog.add_field == 0 {
+                    dialog.add_field = 1;
+                } else {
+                    let guest = dialog.guest_input.trim().to_owned();
+                    let source_val = dialog.source_input.trim().to_owned();
+                    if guest.is_empty() {
+                        dialog.error = Some("Guest path cannot be empty".into());
+                    } else if source_val.is_empty() {
+                        dialog.error = Some("Host path / volume name cannot be empty".into());
+                    } else {
+                        let source = match dialog.kind {
+                            MountKindChoice::Bind => MountSource::Bind(source_val),
+                            MountKindChoice::Named => MountSource::Named(source_val),
+                        };
+                        dialog.entries.push(VolumeMountConfig {
+                            guest_path: guest,
+                            source,
+                        });
+                        dialog.selected = dialog.entries.len().saturating_sub(1);
+                        dialog.mode = SubDialogMode::List;
+                        dialog.error = None;
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                let dialog = &mut app.create_dialog.mounts_dialog;
+                if dialog.add_field == 0 {
+                    dialog.guest_input.push(c);
+                } else {
+                    dialog.source_input.push(c);
+                }
+                dialog.error = None;
+            }
+            _ => {}
+        },
+    }
+}
+
+fn handle_volumes_view_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+    match app.volumes_view.mode {
+        SubDialogMode::List => match code {
+            KeyCode::Esc => {
+                app.volumes_view.visible = false;
+            }
+            KeyCode::Up => {
+                if app.volumes_view.selected > 0 {
+                    app.volumes_view.selected -= 1;
+                }
+            }
+            KeyCode::Down => {
+                let len = app.volumes_view.volumes.len();
+                if len > 0 && app.volumes_view.selected + 1 < len {
+                    app.volumes_view.selected += 1;
+                }
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') => {
+                app.volumes_view.mode = SubDialogMode::Add;
+                app.volumes_view.name_input.clear();
+                app.volumes_view.disk = false;
+                app.volumes_view.error = None;
+            }
+            KeyCode::Char('d') | KeyCode::Delete => {
+                if let Some(vol) = app
+                    .volumes_view
+                    .volumes
+                    .get(app.volumes_view.selected)
+                    .cloned()
+                {
+                    let tx = app.msg_tx.clone();
+                    tokio::spawn(async move {
+                        let result = crate::sandbox::remove_volume(&vol.name).await;
+                        let (msg, is_err) = match result {
+                            Ok(()) => (format!("Removed volume '{}'", vol.name), false),
+                            Err(e) => (format!("Remove volume failed: {e}"), true),
+                        };
+                        let _ = tx.send(AppMessage::Notification(msg, is_err));
+                        if let Ok(list) = crate::sandbox::list_volumes().await {
+                            let _ = tx.send(AppMessage::VolumeList(Ok(list)));
+                        }
+                    });
+                }
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                request_volume_refresh(app);
+            }
+            _ => {}
+        },
+        SubDialogMode::Add => match code {
+            KeyCode::Esc => {
+                app.volumes_view.mode = SubDialogMode::List;
+                app.volumes_view.error = None;
+            }
+            KeyCode::Char(' ') => {
+                app.volumes_view.disk = !app.volumes_view.disk;
+            }
+            KeyCode::Backspace => {
+                app.volumes_view.name_input.pop();
+                app.volumes_view.error = None;
+            }
+            KeyCode::Enter => {
+                let name = app.volumes_view.name_input.trim().to_owned();
+                if name.is_empty() {
+                    app.volumes_view.error = Some("Name cannot be empty".into());
+                } else {
+                    let disk = app.volumes_view.disk;
+                    app.volumes_view.mode = SubDialogMode::List;
+                    app.volumes_view.error = None;
+                    let tx = app.msg_tx.clone();
+                    tokio::spawn(async move {
+                        let result = crate::sandbox::create_volume(&name, disk, None).await;
+                        let (msg, is_err) = match result {
+                            Ok(()) => (format!("Created volume '{name}'"), false),
+                            Err(e) => (format!("Create volume failed: {e}"), true),
+                        };
+                        let _ = tx.send(AppMessage::Notification(msg, is_err));
+                        if let Ok(list) = crate::sandbox::list_volumes().await {
+                            let _ = tx.send(AppMessage::VolumeList(Ok(list)));
+                        }
+                    });
+                }
+            }
+            KeyCode::Char(c) => {
+                app.volumes_view.name_input.push(c);
+                app.volumes_view.error = None;
+            }
+            _ => {}
+        },
+    }
+}
+
 fn submit_create_dialog(app: &mut App) {
     let dlg = &app.create_dialog;
 
@@ -1527,6 +1835,7 @@ fn submit_create_dialog(app: &mut App) {
 
     let disable_network = dlg.disable_network;
     let network_rules = dlg.network_rules.clone();
+    let mounts = dlg.mounts.clone();
 
     app.create_dialog = Default::default();
 
@@ -1547,6 +1856,7 @@ fn submit_create_dialog(app: &mut App) {
             max_memory_mib: max_memory,
             disable_network,
             network_rules,
+            mounts,
         };
         let result = crate::sandbox::create_sandbox(&cfg).await;
         let (msg, is_err) = match result {
@@ -1627,6 +1937,15 @@ fn nav_fs_up(app: &mut App) {
             app.request_fs(&sb.name, &parent_str);
         }
     }
+}
+
+/// Trigger a background refresh of the named-volumes list.
+fn request_volume_refresh(app: &App) {
+    let tx = app.msg_tx.clone();
+    tokio::spawn(async move {
+        let result = crate::sandbox::list_volumes().await;
+        let _ = tx.send(AppMessage::VolumeList(result));
+    });
 }
 
 fn action_start(app: &mut App) {
@@ -2051,7 +2370,9 @@ mod tests {
         dlg.next_field();
         assert_eq!(dlg.field, 6);
         dlg.next_field();
-        assert_eq!(dlg.field, 7); // Create button
+        assert_eq!(dlg.field, 7);
+        dlg.next_field();
+        assert_eq!(dlg.field, 8); // Create button
         dlg.next_field();
         assert_eq!(dlg.field, 0);
     }
@@ -2334,7 +2655,7 @@ mod tests {
         app.create_dialog = CreateDialog::open();
         // field == 0
         handle_event(&mut app, key_press(KeyCode::BackTab));
-        assert_eq!(app.create_dialog.field, 7); // Create button
+        assert_eq!(app.create_dialog.field, 8); // Create button
     }
 
     #[test]
@@ -2538,6 +2859,132 @@ mod tests {
         assert!(validate_cidr("10.0.0.0/99").is_err());
         assert!(validate_cidr("999.0.0.0/8").is_err());
         assert!(validate_cidr("10.0.0.0").is_err());
+    }
+
+    #[test]
+    fn test_dialog_mounts_sub_dialog_add_bind_entry() {
+        let mut app = make_app();
+        app.create_dialog = CreateDialog::open();
+        app.create_dialog.field = 7;
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        assert!(app.create_dialog.mounts_dialog.visible);
+        handle_event(&mut app, key_press(KeyCode::Char('a')));
+        for ch in "/data".chars() {
+            handle_event(&mut app, key_press(KeyCode::Char(ch)));
+        }
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        for ch in "/host/data".chars() {
+            handle_event(&mut app, key_press(KeyCode::Char(ch)));
+        }
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        handle_event(&mut app, key_press(KeyCode::Esc));
+        assert_eq!(
+            app.create_dialog.mounts,
+            vec![VolumeMountConfig {
+                guest_path: "/data".into(),
+                source: MountSource::Bind("/host/data".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_dialog_mounts_sub_dialog_add_named_entry() {
+        let mut app = make_app();
+        app.create_dialog = CreateDialog::open();
+        app.create_dialog.mounts_dialog = MountsDialog::open(vec![]);
+        handle_event(&mut app, key_press(KeyCode::Char('a')));
+        for ch in "/cache".chars() {
+            handle_event(&mut app, key_press(KeyCode::Char(ch)));
+        }
+        handle_event(&mut app, key_press(KeyCode::Enter)); // move to source field
+        handle_event(&mut app, key_press(KeyCode::Char('n'))); // choose Named kind
+        for ch in "my-cache".chars() {
+            handle_event(&mut app, key_press(KeyCode::Char(ch)));
+        }
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        assert_eq!(
+            app.create_dialog.mounts_dialog.entries,
+            vec![VolumeMountConfig {
+                guest_path: "/cache".into(),
+                source: MountSource::Named("my-cache".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_dialog_mounts_delete_entry() {
+        let mut app = make_app();
+        app.create_dialog = CreateDialog::open();
+        app.create_dialog.mounts_dialog = MountsDialog::open(vec![VolumeMountConfig {
+            guest_path: "/data".into(),
+            source: MountSource::Bind("/host".into()),
+        }]);
+        handle_event(&mut app, key_press(KeyCode::Char('d')));
+        assert!(app.create_dialog.mounts_dialog.entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_v_key_opens_volumes_view() {
+        let mut app = make_app();
+        handle_event(&mut app, key_press(KeyCode::Char('v')));
+        assert!(app.volumes_view.visible);
+    }
+
+    #[test]
+    fn test_volumes_view_esc_closes() {
+        let mut app = make_app();
+        app.volumes_view = VolumesView::open();
+        handle_event(&mut app, key_press(KeyCode::Esc));
+        assert!(!app.volumes_view.visible);
+    }
+
+    #[test]
+    fn test_volumes_view_navigation() {
+        let mut app = make_app();
+        app.volumes_view = VolumesView::open();
+        app.volumes_view.volumes = vec![
+            VolumeInfo {
+                name: "a".into(),
+                kind: microsandbox::VolumeKind::Directory,
+                quota_mib: None,
+                used_bytes: 0,
+            },
+            VolumeInfo {
+                name: "b".into(),
+                kind: microsandbox::VolumeKind::Directory,
+                quota_mib: None,
+                used_bytes: 0,
+            },
+        ];
+        handle_event(&mut app, key_press(KeyCode::Down));
+        assert_eq!(app.volumes_view.selected, 1);
+        handle_event(&mut app, key_press(KeyCode::Up));
+        assert_eq!(app.volumes_view.selected, 0);
+    }
+
+    #[test]
+    fn test_volumes_view_add_mode_toggle_and_validation() {
+        let mut app = make_app();
+        app.volumes_view = VolumesView::open();
+        handle_event(&mut app, key_press(KeyCode::Char('n')));
+        assert_eq!(app.volumes_view.mode, SubDialogMode::Add);
+        handle_event(&mut app, key_press(KeyCode::Char(' ')));
+        assert!(app.volumes_view.disk);
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        assert!(app.volumes_view.error.is_some());
+    }
+
+    #[test]
+    fn test_handle_message_volume_list_updates_state() {
+        let mut app = make_app();
+        let volumes = vec![VolumeInfo {
+            name: "vol1".into(),
+            kind: microsandbox::VolumeKind::Disk,
+            quota_mib: Some(1024),
+            used_bytes: 512,
+        }];
+        app.handle_message(AppMessage::VolumeList(Ok(volumes.clone())));
+        assert_eq!(app.volumes_view.volumes, volumes);
     }
 
     #[tokio::test]
@@ -2835,7 +3282,7 @@ mod tests {
     fn test_dialog_down_wraps_from_last_to_first() {
         let mut app = make_app();
         app.create_dialog = CreateDialog::open();
-        app.create_dialog.field = 7; // Create button (last position)
+        app.create_dialog.field = 8; // Create button (last position)
         handle_event(&mut app, key_press(KeyCode::Down));
         assert_eq!(app.create_dialog.field, 0);
     }
@@ -2855,7 +3302,7 @@ mod tests {
         app.create_dialog = CreateDialog::open();
         app.create_dialog.field = 0;
         handle_event(&mut app, key_press(KeyCode::Up));
-        assert_eq!(app.create_dialog.field, 7); // Create button
+        assert_eq!(app.create_dialog.field, 8); // Create button
     }
 
     // ── dialog: digit-only filtering for CPUs and Memory ────────────────────

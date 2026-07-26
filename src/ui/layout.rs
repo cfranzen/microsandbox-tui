@@ -111,6 +111,17 @@ pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("Esc", key),
             Span::styled(" cancel", dim),
         ]);
+    } else if app.volumes_view.visible {
+        spans.extend([
+            Span::styled("↑↓", key),
+            Span::styled(" select  ", dim),
+            Span::styled("n", key),
+            Span::styled(" new  ", dim),
+            Span::styled("d", key),
+            Span::styled(" delete  ", dim),
+            Span::styled("Esc", key),
+            Span::styled(" close", dim),
+        ]);
     } else {
         use crate::app::Focus;
         if app.focus == Focus::SandboxList && !app.new_sandbox_selected() {
@@ -128,6 +139,8 @@ pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         spans.extend([
             Span::styled("n", key),
             Span::styled(" new  ", dim),
+            Span::styled("v", key),
+            Span::styled(" volumes  ", dim),
             Span::styled("r", key),
             Span::styled(" refresh", dim),
         ]);

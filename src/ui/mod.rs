@@ -8,6 +8,7 @@ mod layout;
 mod logs;
 mod metrics;
 mod sandbox_list;
+mod volumes;
 
 use ratatui::Frame;
 
@@ -25,5 +26,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
     // Modal on top of everything
     if app.create_dialog.visible {
         create_dialog::render(f, app, f.area());
+    }
+    if app.volumes_view.visible {
+        volumes::render(f, app, f.area());
     }
 }

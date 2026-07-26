@@ -17,7 +17,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let popup = centred_rect(65, 27, area);
+    let popup = centred_rect(65, 30, area);
     f.render_widget(Clear, popup);
 
     let block = Block::default()
@@ -52,6 +52,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         DialogTab::Basic => {
             let ports_summary = format_ports_summary(&dlg.ports);
             let env_summary = format_env_vars_summary(&dlg.env_vars);
+            let mounts_summary = format_mounts_summary(&dlg.mounts);
             let workdir_summary = if dlg.workdir.is_empty() {
                 "(none)".into()
             } else {
@@ -71,6 +72,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 dlg.field == 6,
                 chunks[8],
             );
+            render_managed_field(f, "Mounts  ", &mounts_summary, dlg.field == 7, chunks[9]);
         }
         DialogTab::Advanced => {
             let rules_summary = format_network_rules_summary(&dlg.network_rules);
@@ -107,7 +109,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         "Enter create sandbox   Esc cancel"
     } else {
         match (dlg.tab, dlg.field) {
-            (DialogTab::Basic, 4) | (DialogTab::Basic, 5) => {
+            (DialogTab::Basic, 4) | (DialogTab::Basic, 5) | (DialogTab::Basic, 7) => {
                 "Tab/↑↓ navigate   ◄► tab   Enter manage   Esc cancel"
             }
             (DialogTab::Basic, 6) => "Tab/↑↓ navigate   ◄► tab   Enter browse   Esc cancel",
@@ -139,6 +141,9 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     }
     if dlg.network_rules_dialog.visible {
         render_network_rules_dialog(f, app, area);
+    }
+    if dlg.mounts_dialog.visible {
+        render_mounts_dialog(f, app, area);
     }
 }
 
@@ -336,6 +341,23 @@ fn format_network_rules_summary(rules: &[crate::sandbox::NetworkRule]) -> String
         rules
             .iter()
             .map(|r| format!("{}:{} {}", r.direction.label(), r.action.label(), r.cidr))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// Format a list of volume mounts as a compact summary string.
+fn format_mounts_summary(mounts: &[crate::sandbox::VolumeMountConfig]) -> String {
+    use crate::sandbox::MountSource;
+    if mounts.is_empty() {
+        "(none)".into()
+    } else {
+        mounts
+            .iter()
+            .map(|m| match &m.source {
+                MountSource::Bind(host) => format!("{}:{host}", m.guest_path),
+                MountSource::Named(name) => format!("{}:vol({name})", m.guest_path),
+            })
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -970,6 +992,186 @@ fn render_network_rules_dialog(f: &mut Frame, app: &App, area: Rect) {
                         Style::default().fg(Color::DarkGray),
                     )),
                     chunks[2],
+                );
+            }
+        }
+    }
+}
+
+/// Render the volume mounts management sub-dialog.
+///
+/// Mounts are applied only when the sandbox is created (the SDK has no API
+/// for changing mounts on an existing sandbox), so this dialog is only
+/// reachable from the create-sandbox dialog's Basic tab.
+fn render_mounts_dialog(f: &mut Frame, app: &App, area: Rect) {
+    use crate::sandbox::MountSource;
+
+    let dialog = &app.create_dialog.mounts_dialog;
+    if !dialog.visible {
+        return;
+    }
+
+    match dialog.mode {
+        SubDialogMode::List => {
+            let visible_rows = dialog.entries.len().clamp(3, 8) as u16;
+            let height = visible_rows + 4;
+            let popup = centred_rect(65, height, area);
+            f.render_widget(Clear, popup);
+
+            let block = Block::default()
+                .title(Span::styled(
+                    " Manage Volume Mounts ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ))
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Yellow));
+
+            let inner = block.inner(popup);
+            f.render_widget(block, popup);
+
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Fill(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                ])
+                .split(inner);
+
+            if dialog.entries.is_empty() {
+                f.render_widget(
+                    Paragraph::new(Span::styled(
+                        "  (no mounts configured)",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                    chunks[0],
+                );
+            } else {
+                for (i, mount) in dialog.entries.iter().enumerate() {
+                    if i as u16 >= chunks[0].height {
+                        break;
+                    }
+                    let is_sel = i == dialog.selected;
+                    let style = if is_sel {
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    let entry = match &mount.source {
+                        MountSource::Bind(host) => {
+                            format!("{} <- bind {host}", mount.guest_path)
+                        }
+                        MountSource::Named(name) => {
+                            format!("{} <- volume {name}", mount.guest_path)
+                        }
+                    };
+                    let row = Rect::new(chunks[0].x, chunks[0].y + i as u16, chunks[0].width, 1);
+                    f.render_widget(
+                        Paragraph::new(Span::styled(format!("  {entry}"), style)),
+                        row,
+                    );
+                }
+            }
+
+            if let Some(ref err) = dialog.error {
+                f.render_widget(
+                    Paragraph::new(Span::styled(
+                        format!("  ✗ {err}"),
+                        Style::default().fg(Color::Red),
+                    )),
+                    chunks[1],
+                );
+            }
+
+            f.render_widget(
+                Paragraph::new(Span::styled(
+                    "  ↑↓ select   a add   d delete   Esc close",
+                    Style::default().fg(Color::DarkGray),
+                )),
+                chunks[2],
+            );
+        }
+        SubDialogMode::Add => {
+            // border(2) + guest field(3) + source field(3) + kind line(1) + hint(1) = 10
+            let popup = centred_rect(65, 10, area);
+            f.render_widget(Clear, popup);
+
+            let block = Block::default()
+                .title(Span::styled(
+                    " Add Volume Mount ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ))
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Yellow));
+
+            let inner = block.inner(popup);
+            f.render_widget(block, popup);
+
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3), // guest path
+                    Constraint::Length(3), // host path / volume name
+                    Constraint::Length(1), // kind summary
+                    Constraint::Length(1), // hint/error
+                ])
+                .split(inner);
+
+            render_field(
+                f,
+                "Guest",
+                &dialog.guest_input,
+                dialog.add_field == 0,
+                chunks[0],
+            );
+            let source_label = match dialog.kind {
+                crate::app::MountKindChoice::Bind => "Host ",
+                crate::app::MountKindChoice::Named => "Vol  ",
+            };
+            render_field(
+                f,
+                source_label,
+                &dialog.source_input,
+                dialog.add_field == 1,
+                chunks[1],
+            );
+
+            let kind_label = match dialog.kind {
+                crate::app::MountKindChoice::Bind => "Bind mount (b)",
+                crate::app::MountKindChoice::Named => "Named volume (n)",
+            };
+            f.render_widget(
+                Paragraph::new(Span::styled(
+                    format!("Kind: {kind_label}"),
+                    Style::default().fg(Color::Yellow),
+                )),
+                chunks[2],
+            );
+
+            if let Some(ref err) = dialog.error {
+                f.render_widget(
+                    Paragraph::new(Span::styled(
+                        format!(" ✗ {err}"),
+                        Style::default().fg(Color::Red),
+                    )),
+                    chunks[3],
+                );
+            } else {
+                f.render_widget(
+                    Paragraph::new(Span::styled(
+                        " Tab field   b/n kind   Enter add   Esc cancel",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                    chunks[3],
                 );
             }
         }

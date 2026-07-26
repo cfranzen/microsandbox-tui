@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   policy remains fixed for the lifetime of the sandbox — the SDK has no API
   for changing it post-creation, so this is documented as a creation-time-only
   feature in the UI and README.
+- Volume/mount management: a new top-level "Volumes" view (`v`) lists named
+  volumes and lets you create/remove them directly via the SDK's
+  `Volume`/`VolumeHandle` API. The create-sandbox dialog's Basic tab gained a
+  "Mounts" field for adding bind mounts (host directory) or named-volume
+  mounts, applied via the sandbox builder's `.volume(...)` at creation time.
+  As with network policy, existing sandboxes' mounts cannot be changed after
+  creation — documented as a known SDK limitation.
 
 ## [0.1.0] - 2026-07-25
 

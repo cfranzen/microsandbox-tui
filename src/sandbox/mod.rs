@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use futures::Stream;
 use microsandbox::logs::{LogStreamOptions, LogStreamStart};
 use microsandbox::sandbox::{FsEntryKind, LogEntry, LogOptions, LogSource};
-use microsandbox::{MicrosandboxError, NetworkPolicy, Sandbox, SandboxMetrics};
+use microsandbox::{MicrosandboxError, NetworkPolicy, Sandbox, SandboxMetrics, Volume, VolumeKind};
 
 // Re-export for use in other modules
 pub use microsandbox::sandbox::SandboxStatus;
@@ -99,6 +99,31 @@ pub struct NetworkRule {
     pub direction: NetRuleDirection,
 }
 
+/// Where a volume mount's data comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MountSource {
+    /// Bind-mount a host directory.
+    Bind(String),
+    /// Mount a pre-existing named volume (see [`Volume`]).
+    Named(String),
+}
+
+/// A single guest-path mount configured at sandbox-creation time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VolumeMountConfig {
+    pub guest_path: String,
+    pub source: MountSource,
+}
+
+/// Summary of a named volume, as shown in the Volumes view.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VolumeInfo {
+    pub name: String,
+    pub kind: VolumeKind,
+    pub quota_mib: Option<u32>,
+    pub used_bytes: u64,
+}
+
 /// All parameters for creating a new sandbox via the TUI dialog.
 #[derive(Debug, Clone)]
 pub struct CreateConfig {
@@ -118,6 +143,9 @@ pub struct CreateConfig {
     /// CIDR-based network policy rules applied at creation time. Ignored
     /// (with `disable_network` taking precedence) when empty.
     pub network_rules: Vec<NetworkRule>,
+    /// Volume mounts applied at creation time. Existing sandboxes cannot
+    /// have their mounts changed post-creation per the current SDK.
+    pub mounts: Vec<VolumeMountConfig>,
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -259,6 +287,20 @@ pub async fn create_sandbox(cfg: &CreateConfig) -> Result<()> {
         builder = builder.network(|n| n.policy(build_network_policy(&cfg.network_rules)));
     }
 
+    for mount in &cfg.mounts {
+        let guest_path = mount.guest_path.clone();
+        builder = match &mount.source {
+            MountSource::Bind(host) => {
+                let host = host.clone();
+                builder.volume(guest_path, |m| m.bind(host))
+            }
+            MountSource::Named(name) => {
+                let name = name.clone();
+                builder.volume(guest_path, |m| m.named(name))
+            }
+        };
+    }
+
     let sb = builder.create().await?;
     sb.detach().await;
     Ok(())
@@ -394,6 +436,45 @@ pub async fn list_fs(name: &str, path: &str) -> Result<Option<Vec<FsEntry>>> {
         .collect();
 
     Ok(Some(result))
+}
+
+//--------------------------------------------------------------------------------------------------
+// Volumes
+//--------------------------------------------------------------------------------------------------
+
+/// List all named volumes known to the local backend.
+pub async fn list_volumes() -> Result<Vec<VolumeInfo>> {
+    let handles = Volume::list().await?;
+    Ok(handles
+        .into_iter()
+        .map(|h| VolumeInfo {
+            name: h.name().to_owned(),
+            kind: h.kind(),
+            quota_mib: h.quota_mib(),
+            used_bytes: h.used_bytes(),
+        })
+        .collect())
+}
+
+/// Create a new named volume.
+pub async fn create_volume(name: &str, disk: bool, quota_mib: Option<u32>) -> Result<()> {
+    let mut builder = Volume::builder(name);
+    builder = if disk {
+        builder.disk()
+    } else {
+        builder.directory()
+    };
+    if let Some(q) = quota_mib {
+        builder = builder.quota(q);
+    }
+    builder.create().await?;
+    Ok(())
+}
+
+/// Remove a named volume by name.
+pub async fn remove_volume(name: &str) -> Result<()> {
+    Volume::remove(name).await?;
+    Ok(())
 }
 
 //--------------------------------------------------------------------------------------------------
