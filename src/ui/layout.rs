@@ -102,7 +102,16 @@ pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(" switch panel  ", dim),
     ];
 
-    if app.create_dialog.visible {
+    if app.search_active {
+        spans = vec![
+            Span::styled("Type", key),
+            Span::styled(" to filter  ", dim),
+            Span::styled("Enter", key),
+            Span::styled(" confirm  ", dim),
+            Span::styled("Esc", key),
+            Span::styled(" clear & exit", dim),
+        ];
+    } else if app.create_dialog.visible {
         spans.extend([
             Span::styled("Tab", key),
             Span::styled(" next field  ", dim),
@@ -141,6 +150,8 @@ pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         spans.extend([
             Span::styled("n", key),
             Span::styled(" new  ", dim),
+            Span::styled("/", key),
+            Span::styled(" search  ", dim),
             Span::styled("v", key),
             Span::styled(" volumes  ", dim),
             Span::styled("r", key),

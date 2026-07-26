@@ -24,9 +24,16 @@ const NEW_CARD_HEIGHT: u16 = 3;
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     // Outer panel block
     let panel_focused = app.focus == Focus::SandboxList;
+    let title = if app.search_active {
+        format!(" Sandboxes — search: {}_ ", app.filter)
+    } else if !app.filter.trim().is_empty() {
+        format!(" Sandboxes — filter: {} ", app.filter)
+    } else {
+        " Sandboxes ".to_string()
+    };
     let panel_block = Block::default()
         .title(Span::styled(
-            " Sandboxes ",
+            title,
             Style::default()
                 .fg(Color::Magenta)
                 .add_modifier(Modifier::BOLD),
@@ -50,27 +57,44 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    // Build the list of areas for each card using a vertical layout.
-    // We render each card in a fixed-height slice.
-    let total_items = app.sandboxes.len() + 1; // +1 for "New Sandbox"
+    let visible = app.visible_indices();
+    // "New Sandbox" placeholder is hidden while a filter is active.
+    let show_new_card = app.filter.trim().is_empty();
+    let total_items = visible.len() + usize::from(show_new_card);
+
+    if total_items == 0 {
+        let msg = Line::from(Span::styled(
+            "No sandboxes match the filter",
+            Style::default().fg(Color::DarkGray),
+        ));
+        f.render_widget(Paragraph::new(msg), inner);
+        return;
+    }
+
+    // Position of the current selection within the displayed (filtered) order.
+    let selected_pos = if app.new_sandbox_selected() {
+        visible.len()
+    } else {
+        visible.iter().position(|&i| i == app.selected).unwrap_or(0)
+    };
 
     // Simple scroll: figure out the first visible item based on selected
     let visible_height = inner.height;
-    let first_visible = compute_first_visible(app.selected, total_items, visible_height);
+    let first_visible = compute_first_visible(selected_pos, total_items, visible_height);
 
     let mut y = inner.y;
     let x = inner.x;
     let w = inner.width;
 
-    for (item_idx, _) in (first_visible..total_items).enumerate() {
-        let abs_idx = first_visible + item_idx;
-        let selected = abs_idx == app.selected;
+    for item_idx in first_visible..total_items {
+        let selected = item_idx == selected_pos;
 
-        if abs_idx < app.sandboxes.len() {
+        if item_idx < visible.len() {
             // Regular sandbox card
             if y + CARD_TOTAL_HEIGHT > inner.y + visible_height {
                 break;
             }
+            let abs_idx = visible[item_idx];
             let card_area = Rect {
                 x,
                 y,

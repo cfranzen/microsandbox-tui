@@ -39,6 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   highlighted sandbox, and a single summary notification reports how many
   succeeded. Marks are cleared after the bulk action runs and are
   automatically pruned if a marked sandbox disappears from a refreshed list.
+- Search/filter: press `/` to open a live search box in the sandbox list.
+  Typing filters sandboxes by substring match on name; `status:running`,
+  `status:stopped`, and `status:crashed` tokens filter by status and can be
+  combined with a name substring. `Enter` confirms the filter and returns
+  focus to the list (filter stays active); `Esc` clears it. The active
+  filter is shown in the panel title, and the "New Sandbox" placeholder is
+  hidden while a filter is applied.
 
 ## [0.1.0] - 2026-07-25
 

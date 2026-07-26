@@ -527,6 +527,11 @@ pub struct App {
     /// start/stop/kill/remove keys apply to every marked sandbox instead of
     /// only the highlighted one.
     pub marked: std::collections::HashSet<String>,
+    /// Active search/filter string (substring match on name, or `status:`
+    /// tokens). Empty means no filter is applied.
+    pub filter: String,
+    /// True while the user is actively typing in the search/filter input.
+    pub search_active: bool,
     /// Which panel has keyboard focus.
     pub focus: Focus,
     /// Which detail tab is active.
@@ -575,6 +580,8 @@ impl App {
             sandboxes: Vec::new(),
             selected: 0,
             marked: Default::default(),
+            filter: String::new(),
+            search_active: false,
             focus: Focus::SandboxList,
             tab: DetailTab::Logs,
             log_scroll: 0,
@@ -609,26 +616,65 @@ impl App {
         });
     }
 
+    /// Return the indices into `sandboxes` that match the current filter.
+    /// An empty filter matches every sandbox.
+    pub fn visible_indices(&self) -> Vec<usize> {
+        if self.filter.trim().is_empty() {
+            return (0..self.sandboxes.len()).collect();
+        }
+        self.sandboxes
+            .iter()
+            .enumerate()
+            .filter(|(_, sb)| sandbox_matches_filter(sb, &self.filter))
+            .map(|(i, _)| i)
+            .collect()
+    }
+
     /// Select the next sandbox in the list.
     pub fn select_next(&mut self) {
-        if self.sandboxes.is_empty() {
+        if self.filter.trim().is_empty() {
+            if self.sandboxes.is_empty() {
+                return;
+            }
+            let next = (self.selected + 1).min(self.sandboxes.len());
+            // +1 for the "New Sandbox" entry at the bottom
+            if next <= self.sandboxes.len() {
+                self.selected = next;
+            }
             return;
         }
-        let next = (self.selected + 1).min(self.sandboxes.len());
-        // +1 for the "New Sandbox" entry at the bottom
-        if next <= self.sandboxes.len() {
-            self.selected = next;
+        let visible = self.visible_indices();
+        if visible.is_empty() {
+            return;
+        }
+        match visible.iter().position(|&i| i == self.selected) {
+            Some(pos) if pos + 1 < visible.len() => self.selected = visible[pos + 1],
+            None => self.selected = visible[0],
+            _ => {}
         }
     }
 
     /// Select the previous sandbox in the list.
     pub fn select_prev(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
+        if self.filter.trim().is_empty() {
+            self.selected = self.selected.saturating_sub(1);
+            return;
+        }
+        let visible = self.visible_indices();
+        if visible.is_empty() {
+            return;
+        }
+        match visible.iter().position(|&i| i == self.selected) {
+            Some(pos) if pos > 0 => self.selected = visible[pos - 1],
+            None => self.selected = visible[0],
+            _ => {}
+        }
     }
 
-    /// Returns true if the "New Sandbox" placeholder is selected.
+    /// Returns true if the "New Sandbox" placeholder is selected. The
+    /// placeholder is hidden while a filter is active.
     pub fn new_sandbox_selected(&self) -> bool {
-        self.selected == self.sandboxes.len()
+        self.filter.trim().is_empty() && self.selected == self.sandboxes.len()
     }
 
     /// Switch to the next detail tab.
@@ -1011,6 +1057,12 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
         return;
     }
 
+    // Search/filter input steals key input while active.
+    if app.search_active {
+        handle_search_key(app, key.code);
+        return;
+    }
+
     match key.code {
         // Global quit
         KeyCode::Char('q') | KeyCode::Char('Q') => app.should_quit = true,
@@ -1060,6 +1112,9 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
         }
 
         // Sandbox actions (only when focus is on the list)
+        KeyCode::Char('/') if app.focus == Focus::SandboxList => {
+            app.search_active = true;
+        }
         KeyCode::Char(' ') if app.focus == Focus::SandboxList => {
             toggle_mark(app);
         }
@@ -1913,6 +1968,48 @@ fn submit_create_dialog(app: &mut App) {
 // Helpers
 //--------------------------------------------------------------------------------------------------
 
+/// Handle key input while the search/filter box is active.
+fn handle_search_key(app: &mut App, code: KeyCode) {
+    match code {
+        KeyCode::Esc => {
+            app.search_active = false;
+            app.filter.clear();
+            clamp_selection_to_filter(app);
+        }
+        KeyCode::Enter => {
+            app.search_active = false;
+            clamp_selection_to_filter(app);
+        }
+        KeyCode::Backspace => {
+            app.filter.pop();
+            clamp_selection_to_filter(app);
+        }
+        KeyCode::Char(c) => {
+            app.filter.push(c);
+            clamp_selection_to_filter(app);
+        }
+        _ => {}
+    }
+}
+
+/// Ensure the current selection still points at a visible sandbox after the
+/// filter changes; snaps to the first match, or the "New Sandbox" slot when
+/// no filter is active and the list is empty.
+fn clamp_selection_to_filter(app: &mut App) {
+    let visible = app.visible_indices();
+    if visible.is_empty() {
+        app.selected = if app.filter.trim().is_empty() {
+            app.sandboxes.len()
+        } else {
+            0
+        };
+        return;
+    }
+    if !visible.contains(&app.selected) {
+        app.selected = visible[0];
+    }
+}
+
 fn on_sandbox_selected(app: &mut App) {
     app.log_scroll = 0;
     app.fs_scroll = 0;
@@ -1984,6 +2081,20 @@ fn request_volume_refresh(app: &App) {
         let result = crate::sandbox::list_volumes().await;
         let _ = tx.send(AppMessage::VolumeList(result));
     });
+}
+
+/// Returns true if a sandbox matches every whitespace-separated token of the
+/// filter string. A `status:<value>` token matches the sandbox's status
+/// (case-insensitive, e.g. `status:running`); any other token is matched as
+/// a case-insensitive substring of the sandbox's name.
+fn sandbox_matches_filter(sb: &SandboxInfo, filter: &str) -> bool {
+    filter.split_whitespace().all(|token| {
+        if let Some(status) = token.strip_prefix("status:") {
+            format!("{:?}", sb.status).eq_ignore_ascii_case(status)
+        } else {
+            sb.name.to_lowercase().contains(&token.to_lowercase())
+        }
+    })
 }
 
 fn action_start(app: &mut App) {
@@ -3368,6 +3479,76 @@ mod tests {
         )])));
         assert!(app.marked.contains("box1"));
         assert!(!app.marked.contains("gone"));
+    }
+
+    // ── handle_event: search/filter ──────────────────────────────────────────
+
+    #[test]
+    fn test_slash_activates_search_mode() {
+        let mut app = make_app();
+        handle_event(&mut app, key_press(KeyCode::Char('/')));
+        assert!(app.search_active);
+    }
+
+    #[test]
+    fn test_typing_in_search_mode_updates_filter_live() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("alpha", Status::Running));
+        app.sandboxes.push(make_sandbox("beta", Status::Stopped));
+        handle_event(&mut app, key_press(KeyCode::Char('/')));
+        handle_event(&mut app, key_press(KeyCode::Char('a')));
+        handle_event(&mut app, key_press(KeyCode::Char('l')));
+        assert_eq!(app.filter, "al");
+        assert_eq!(app.visible_indices(), vec![0]);
+    }
+
+    #[test]
+    fn test_backspace_in_search_mode_edits_filter() {
+        let mut app = make_app();
+        handle_event(&mut app, key_press(KeyCode::Char('/')));
+        handle_event(&mut app, key_press(KeyCode::Char('a')));
+        handle_event(&mut app, key_press(KeyCode::Char('b')));
+        handle_event(&mut app, key_press(KeyCode::Backspace));
+        assert_eq!(app.filter, "a");
+    }
+
+    #[test]
+    fn test_esc_in_search_mode_clears_filter_and_exits() {
+        let mut app = make_app();
+        handle_event(&mut app, key_press(KeyCode::Char('/')));
+        handle_event(&mut app, key_press(KeyCode::Char('x')));
+        handle_event(&mut app, key_press(KeyCode::Esc));
+        assert!(!app.search_active);
+        assert!(app.filter.is_empty());
+    }
+
+    #[test]
+    fn test_enter_in_search_mode_keeps_filter_and_exits_typing() {
+        let mut app = make_app();
+        handle_event(&mut app, key_press(KeyCode::Char('/')));
+        handle_event(&mut app, key_press(KeyCode::Char('x')));
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        assert!(!app.search_active);
+        assert_eq!(app.filter, "x");
+    }
+
+    #[test]
+    fn test_status_token_filters_by_status() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("alpha", Status::Running));
+        app.sandboxes.push(make_sandbox("beta", Status::Stopped));
+        app.filter = "status:running".to_string();
+        assert_eq!(app.visible_indices(), vec![0]);
+    }
+
+    #[test]
+    fn test_new_sandbox_slot_hidden_while_filter_active() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("alpha", Status::Running));
+        app.selected = 1; // "new sandbox" slot when no filter
+        assert!(app.new_sandbox_selected());
+        app.filter = "alpha".to_string();
+        assert!(!app.new_sandbox_selected());
     }
 
     #[tokio::test]

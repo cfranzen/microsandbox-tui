@@ -13,6 +13,9 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 - **Multi-select bulk operations** — mark multiple sandboxes with `Space` (shown with a
   `☑` prefix and yellow border) and apply Start/Stop/Kill/Remove to all marked
   sandboxes at once; actions run concurrently and report a single summary notification
+- **Search/filter** — press `/` to search sandboxes live by substring on name, or use
+  `status:running` / `status:stopped` / `status:crashed` tokens to filter by status; the
+  active filter is shown in the panel title and stays applied until cleared with `Esc`
 - **Logs tab** — scrollable, colour-coded log output by source (stdout / stderr / pty /
   system); live-tails new output for running sandboxes via the SDK's log-streaming API
   (falls back to a one-shot read for stopped sandboxes)
@@ -56,6 +59,7 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 | `K` | Kill selected sandbox (SIGKILL), or all marked sandboxes if any are marked *(list focus only)* |
 | `d` | Remove selected sandbox, or all marked sandboxes if any are marked *(list focus only)* |
 | `v` | Open Volumes view |
+| `/` | Enter search/filter mode *(list focus only)* |
 | `r` | Force refresh |
 | `Backspace` | Navigate up one directory *(Filesystem tab only)* |
 
@@ -64,6 +68,16 @@ only starts marked sandboxes that are stopped, `d` only removes marked sandboxes
 aren't running); ineligible marks are skipped and reported in the summary count. Marks
 are cleared once a bulk action is dispatched and are automatically dropped if a marked
 sandbox is removed elsewhere.
+
+#### Search / filter
+
+Press `/` to open the search box (shown in the panel title). Type to filter the list
+live by substring match on sandbox name; add a `status:running`, `status:stopped`, or
+`status:crashed` token to also filter by status (multiple tokens are combined with AND,
+e.g. `web status:running`). Press `Enter` to confirm the filter and return keyboard
+focus to the list (the filter stays active), or `Esc` to clear the filter and exit
+search mode. While a filter is active, the "New Sandbox" placeholder is hidden and the
+panel title shows the current filter text.
 
 ### Create dialog
 
