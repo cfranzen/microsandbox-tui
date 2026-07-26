@@ -3,8 +3,10 @@
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use futures::Stream;
+use microsandbox::logs::{LogStreamOptions, LogStreamStart};
 use microsandbox::sandbox::{FsEntryKind, LogEntry, LogOptions, LogSource};
-use microsandbox::{Sandbox, SandboxMetrics};
+use microsandbox::{MicrosandboxError, Sandbox, SandboxMetrics};
 
 // Re-export for use in other modules
 pub use microsandbox::sandbox::SandboxStatus;
@@ -81,9 +83,12 @@ pub async fn list_sandboxes() -> Result<Vec<SandboxInfo>> {
     let mut infos = Vec::with_capacity(handles.len());
     for h in handles {
         let (image, cpus, memory_mib) = if let Ok(cfg) = h.config() {
-            let image = match &cfg.spec.image {
-                img => img.oci_reference().unwrap_or("(bind/disk)").to_owned(),
-            };
+            let image = cfg
+                .spec
+                .image
+                .oci_reference()
+                .unwrap_or("(bind/disk)")
+                .to_owned();
             (
                 image,
                 cfg.spec.resources.cpus,
@@ -200,6 +205,41 @@ pub async fn read_logs(name: &str, tail: Option<usize>) -> Result<Vec<LogEntry>>
         })
         .await?;
     Ok(entries)
+}
+
+/// Open a live, continuously-following log stream for a running sandbox.
+///
+/// The stream starts from "now" (it does not replay history — callers should
+/// pair this with an initial [`read_logs`] call for backfill) and yields new
+/// entries as they are written. Returns `None` when the sandbox is stopped
+/// or unreachable, in which case callers should fall back to [`read_logs`].
+pub async fn open_log_stream(
+    name: &str,
+) -> Result<Option<impl Stream<Item = Result<LogEntry, MicrosandboxError>> + Send + 'static>> {
+    let handle = match Sandbox::get(name).await {
+        Ok(h) => h,
+        Err(_) => return Ok(None),
+    };
+
+    if handle.status_snapshot() != SandboxStatus::Running {
+        return Ok(None);
+    }
+
+    let stream = handle
+        .log_stream(&LogStreamOptions {
+            sources: vec![
+                LogSource::Stdout,
+                LogSource::Stderr,
+                LogSource::Output,
+                LogSource::System,
+            ],
+            start: LogStreamStart::Since(Utc::now()),
+            until: None,
+            follow: true,
+        })
+        .await?;
+
+    Ok(Some(stream))
 }
 
 //--------------------------------------------------------------------------------------------------

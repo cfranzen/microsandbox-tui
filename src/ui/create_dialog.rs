@@ -37,7 +37,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     // Layout: tab bar + separator + form fields + Create button + hint/error
     let form_fields = dlg.form_field_count();
     let mut constraints = vec![Constraint::Length(1), Constraint::Length(1)];
-    constraints.extend(std::iter::repeat(Constraint::Length(3)).take(form_fields));
+    constraints.extend(std::iter::repeat_n(Constraint::Length(3), form_fields));
     constraints.push(Constraint::Length(1)); // Create button
     constraints.push(Constraint::Length(1)); // hint / error
 
@@ -52,15 +52,25 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         DialogTab::Basic => {
             let ports_summary = format_ports_summary(&dlg.ports);
             let env_summary = format_env_vars_summary(&dlg.env_vars);
-            let workdir_summary =
-                if dlg.workdir.is_empty() { "(none)".into() } else { dlg.workdir.clone() };
+            let workdir_summary = if dlg.workdir.is_empty() {
+                "(none)".into()
+            } else {
+                dlg.workdir.clone()
+            };
             render_field(f, "Name    ", &dlg.name, dlg.field == 0, chunks[2]);
             render_field(f, "Image   ", &dlg.image, dlg.field == 1, chunks[3]);
             render_field(f, "CPUs    ", &dlg.cpus, dlg.field == 2, chunks[4]);
             render_field(f, "Memory  ", &dlg.memory, dlg.field == 3, chunks[5]);
             render_managed_field(f, "Ports   ", &ports_summary, dlg.field == 4, chunks[6]);
             render_managed_field(f, "Env Vars", &env_summary, dlg.field == 5, chunks[7]);
-            render_managed_field_with_hint(f, "Workdir ", &workdir_summary, "browse", dlg.field == 6, chunks[8]);
+            render_managed_field_with_hint(
+                f,
+                "Workdir ",
+                &workdir_summary,
+                "browse",
+                dlg.field == 6,
+                chunks[8],
+            );
         }
         DialogTab::Advanced => {
             render_field(f, "Hostname", &dlg.hostname, dlg.field == 0, chunks[2]);
@@ -68,7 +78,13 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             render_field(f, "Shell   ", &dlg.shell, dlg.field == 2, chunks[4]);
             render_field(f, "Max CPUs", &dlg.max_cpus, dlg.field == 3, chunks[5]);
             render_field(f, "Max Mem ", &dlg.max_memory, dlg.field == 4, chunks[6]);
-            render_toggle(f, "No Net  ", dlg.disable_network, dlg.field == 5, chunks[7]);
+            render_toggle(
+                f,
+                "No Net  ",
+                dlg.disable_network,
+                dlg.field == 5,
+                chunks[7],
+            );
         }
     }
 
@@ -85,12 +101,8 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             (DialogTab::Basic, 4) | (DialogTab::Basic, 5) => {
                 "Tab/↑↓ navigate   ◄► tab   Enter manage   Esc cancel"
             }
-            (DialogTab::Basic, 6) => {
-                "Tab/↑↓ navigate   ◄► tab   Enter browse   Esc cancel"
-            }
-            (DialogTab::Advanced, 5) => {
-                "Tab/↑↓ navigate   ◄► tab   Space toggle   Esc cancel"
-            }
+            (DialogTab::Basic, 6) => "Tab/↑↓ navigate   ◄► tab   Enter browse   Esc cancel",
+            (DialogTab::Advanced, 5) => "Tab/↑↓ navigate   ◄► tab   Space toggle   Esc cancel",
             _ => "Tab/↑↓ navigate   ◄► tab   Esc cancel",
         }
     };
@@ -248,8 +260,13 @@ fn render_create_button(f: &mut Frame, focused: bool, area: Rect) {
     let (fill_style, label_style, arrow_style) = if focused {
         (
             Style::default().fg(Color::DarkGray),
-            Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )
     } else {
         (
@@ -278,7 +295,11 @@ fn format_ports_summary(ports: &[(u16, u16)]) -> String {
     if ports.is_empty() {
         "(none)".into()
     } else {
-        ports.iter().map(|(h, g)| format!("{h}:{g}")).collect::<Vec<_>>().join(", ")
+        ports
+            .iter()
+            .map(|(h, g)| format!("{h}:{g}"))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -287,19 +308,16 @@ fn format_env_vars_summary(vars: &[(String, String)]) -> String {
     if vars.is_empty() {
         "(none)".into()
     } else {
-        vars.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(", ")
+        vars.iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
 /// Render a read-only field whose value is managed via a sub-dialog or picker.
 /// `action_hint` is shown when focused, e.g. `"manage"` or `"browse"`.
-fn render_managed_field(
-    f: &mut Frame,
-    label: &str,
-    summary: &str,
-    focused: bool,
-    area: Rect,
-) {
+fn render_managed_field(f: &mut Frame, label: &str, summary: &str, focused: bool, area: Rect) {
     render_managed_field_with_hint(f, label, summary, "manage", focused, area);
 }
 
@@ -311,16 +329,30 @@ fn render_managed_field_with_hint(
     focused: bool,
     area: Rect,
 ) {
-    let border_color = if focused { Color::Cyan } else { Color::DarkGray };
-    let label_color = if focused { Color::White } else { Color::DarkGray };
+    let border_color = if focused {
+        Color::Cyan
+    } else {
+        Color::DarkGray
+    };
+    let label_color = if focused {
+        Color::White
+    } else {
+        Color::DarkGray
+    };
 
     let block = Block::default()
         .title(Span::styled(
             format!(" {label} "),
-            Style::default().fg(label_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(label_color)
+                .add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
-        .border_type(if focused { BorderType::Thick } else { BorderType::Rounded })
+        .border_type(if focused {
+            BorderType::Thick
+        } else {
+            BorderType::Rounded
+        })
         .border_style(Style::default().fg(border_color));
 
     let inner = block.inner(area);
@@ -361,7 +393,7 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
 
     match dialog.mode {
         SubDialogMode::List => {
-            let visible_rows = dialog.entries.len().max(3).min(8) as u16;
+            let visible_rows = dialog.entries.len().clamp(3, 8) as u16;
             // border(2) + entries + error(1) + hint(1)
             let height = visible_rows + 4;
             let popup = centred_rect(52, height, area);
@@ -370,7 +402,9 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
             let block = Block::default()
                 .title(Span::styled(
                     " Manage Ports ",
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
@@ -444,7 +478,9 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
             let block = Block::default()
                 .title(Span::styled(
                     " Add Port Mapping ",
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
@@ -463,8 +499,20 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
                 ])
                 .split(inner);
 
-            render_field(f, "Host Port ", &dialog.host_input, dialog.add_field == 0, chunks[1]);
-            render_field(f, "Guest Port", &dialog.guest_input, dialog.add_field == 1, chunks[2]);
+            render_field(
+                f,
+                "Host Port ",
+                &dialog.host_input,
+                dialog.add_field == 0,
+                chunks[1],
+            );
+            render_field(
+                f,
+                "Guest Port",
+                &dialog.guest_input,
+                dialog.add_field == 1,
+                chunks[2],
+            );
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
@@ -496,7 +544,7 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
 
     match dialog.mode {
         SubDialogMode::List => {
-            let visible_rows = dialog.entries.len().max(3).min(8) as u16;
+            let visible_rows = dialog.entries.len().clamp(3, 8) as u16;
             let height = visible_rows + 4;
             let popup = centred_rect(60, height, area);
             f.render_widget(Clear, popup);
@@ -504,7 +552,9 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
             let block = Block::default()
                 .title(Span::styled(
                     " Manage Environment Variables ",
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
@@ -586,7 +636,9 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
             let block = Block::default()
                 .title(Span::styled(
                     " Add Environment Variable ",
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
@@ -605,8 +657,20 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
                 ])
                 .split(inner);
 
-            render_field(f, "Key  ", &dialog.key_input, dialog.add_field == 0, chunks[1]);
-            render_field(f, "Value", &dialog.value_input, dialog.add_field == 1, chunks[2]);
+            render_field(
+                f,
+                "Key  ",
+                &dialog.key_input,
+                dialog.add_field == 0,
+                chunks[1],
+            );
+            render_field(
+                f,
+                "Value",
+                &dialog.value_input,
+                dialog.add_field == 1,
+                chunks[2],
+            );
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
@@ -711,12 +775,7 @@ fn render_dir_picker(f: &mut Frame, app: &App, area: Rect) {
         } else {
             Style::default().fg(Color::White)
         };
-        let entry_area = Rect::new(
-            chunks[2].x,
-            chunks[2].y + row as u16,
-            chunks[2].width,
-            1,
-        );
+        let entry_area = Rect::new(chunks[2].x, chunks[2].y + row as u16, chunks[2].width, 1);
         f.render_widget(
             Paragraph::new(Span::styled(format!(" {prefix}{entry}"), style)),
             entry_area,
@@ -758,4 +817,3 @@ fn centred_rect(percent_width: u16, height: u16, area: Rect) -> Rect {
 
     horizontal[1]
 }
-

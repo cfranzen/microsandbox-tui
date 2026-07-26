@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Live streaming logs: the Logs tab now follows a running sandbox's output in
+  real time via the SDK's `log_stream` API, instead of re-polling with a
+  one-shot read every refresh. Stopped sandboxes still use the one-shot
+  `logs()` read. The stream task is started/stopped automatically as the
+  selection or active tab changes, so no background tasks leak across
+  refreshes.
+
 ## [0.1.0] - 2026-07-25
 
 ### Added

@@ -114,8 +114,6 @@ fn render_sandbox_card(
     let highlight = selected && panel_focused;
     let border_color = if highlight {
         Color::Cyan
-    } else if selected {
-        Color::DarkGray
     } else {
         Color::DarkGray
     };

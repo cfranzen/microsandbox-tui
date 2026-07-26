@@ -112,7 +112,14 @@ impl DirPicker {
             default_root()
         };
         let entries = load_dir_entries(&path);
-        Self { visible: true, path, entries, selected: 0, scroll_offset: 0, showing_drives: false }
+        Self {
+            visible: true,
+            path,
+            entries,
+            selected: 0,
+            scroll_offset: 0,
+            showing_drives: false,
+        }
     }
 
     /// Navigate to `new_path` and refresh the entry list.
@@ -209,7 +216,12 @@ pub struct PortsDialog {
 impl PortsDialog {
     pub fn open(entries: Vec<(u16, u16)>) -> Self {
         let selected = entries.len().saturating_sub(1);
-        Self { visible: true, entries, selected, ..Default::default() }
+        Self {
+            visible: true,
+            entries,
+            selected,
+            ..Default::default()
+        }
     }
 }
 
@@ -234,7 +246,12 @@ pub struct EnvVarsDialog {
 impl EnvVarsDialog {
     pub fn open(entries: Vec<(String, String)>) -> Self {
         let selected = entries.len().saturating_sub(1);
-        Self { visible: true, entries, selected, ..Default::default() }
+        Self {
+            visible: true,
+            entries,
+            selected,
+            ..Default::default()
+        }
     }
 }
 
@@ -373,6 +390,8 @@ pub struct Notification {
 pub enum AppMessage {
     SandboxList(Result<Vec<SandboxInfo>>),
     LogEntries(String, Result<Vec<LogEntry>>),
+    /// A single log entry pushed live by a running log-stream task.
+    LogStreamEntry(String, LogEntry),
     Metrics(String, Result<Option<MetricsSnapshot>>),
     FsEntries(String, String, Result<Option<Vec<FsEntry>>>),
     Notification(String, bool),
@@ -410,6 +429,10 @@ pub struct App {
     pub last_refresh: Option<Instant>,
     /// Channel for background tasks to push results.
     pub msg_tx: mpsc::UnboundedSender<AppMessage>,
+    /// Handle of the currently running live log-stream task, if any.
+    log_stream_task: Option<tokio::task::JoinHandle<()>>,
+    /// Name of the sandbox the live log-stream task is currently following.
+    log_stream_name: Option<String>,
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -434,6 +457,8 @@ impl App {
             should_quit: false,
             last_refresh: None,
             msg_tx,
+            log_stream_task: None,
+            log_stream_name: None,
         }
     }
 
@@ -513,6 +538,84 @@ impl App {
         });
     }
 
+    /// Compute which sandbox (if any) the live log stream should currently
+    /// be following: the selected sandbox, but only while the Logs tab is
+    /// active and the sandbox is running.
+    fn log_stream_target(&self) -> Option<String> {
+        if self.tab != DetailTab::Logs {
+            return None;
+        }
+        self.selected_sandbox()
+            .filter(|s| s.status == Status::Running)
+            .map(|s| s.name.clone())
+    }
+
+    /// Start (or stop) the live log-stream background task so it follows
+    /// whatever [`log_stream_target`](Self::log_stream_target) currently
+    /// resolves to. Safe to call after every selection/tab/list change —
+    /// it's a no-op when the target hasn't changed.
+    pub fn sync_log_stream(&mut self) {
+        // Guard against being invoked outside a Tokio runtime (e.g. plain
+        // `#[test]` functions that exercise `handle_message` directly).
+        if tokio::runtime::Handle::try_current().is_err() {
+            return;
+        }
+        let target = self.log_stream_target();
+        if target != self.log_stream_name {
+            self.stop_log_stream();
+            if let Some(name) = target {
+                // Backfill via one-shot read, then start following new entries.
+                self.request_logs(&name);
+                self.start_log_stream(&name);
+                return;
+            }
+        }
+        // No live stream is active (tab isn't Logs, or the sandbox is
+        // stopped) — fall back to a plain one-shot fetch so a stopped
+        // sandbox's Logs tab still shows its captured history.
+        if self.tab == DetailTab::Logs {
+            if let Some(sb) = self.selected_sandbox() {
+                if sb.status != Status::Running {
+                    let name = sb.name.clone();
+                    self.request_logs(&name);
+                }
+            }
+        }
+    }
+
+    /// Spawn a background task that consumes the live log stream for
+    /// `name` and forwards each entry to the main loop.
+    fn start_log_stream(&mut self, name: &str) {
+        let tx = self.msg_tx.clone();
+        let name_owned = name.to_owned();
+        let task_name = name_owned.clone();
+        let handle = tokio::spawn(async move {
+            if let Ok(Some(mut stream)) = crate::sandbox::open_log_stream(&task_name).await {
+                while let Some(item) = stream.next().await {
+                    match item {
+                        Ok(entry) => {
+                            let msg = AppMessage::LogStreamEntry(task_name.clone(), entry);
+                            if tx.send(msg).is_err() {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
+        });
+        self.log_stream_task = Some(handle);
+        self.log_stream_name = Some(name_owned);
+    }
+
+    /// Cancel the currently running live log-stream task, if any.
+    fn stop_log_stream(&mut self) {
+        if let Some(handle) = self.log_stream_task.take() {
+            handle.abort();
+        }
+        self.log_stream_name = None;
+    }
+
     /// Trigger a background metrics fetch for the selected sandbox.
     pub fn request_metrics(&self, name: &str) {
         let tx = self.msg_tx.clone();
@@ -573,6 +676,7 @@ impl App {
                     }
                 }
                 self.last_refresh = Some(Instant::now());
+                self.sync_log_stream();
             }
             AppMessage::SandboxList(Err(e)) => {
                 self.notify(format!("List error: {e}"), true);
@@ -582,6 +686,14 @@ impl App {
             }
             AppMessage::LogEntries(name, Err(e)) => {
                 self.notify(format!("Log error for {name}: {e}"), true);
+            }
+            AppMessage::LogStreamEntry(name, entry) => {
+                let entries = self.logs.entry(name).or_default();
+                entries.push(entry);
+                if entries.len() > MAX_LOG_LINES {
+                    let excess = entries.len() - MAX_LOG_LINES;
+                    entries.drain(0..excess);
+                }
             }
             AppMessage::Metrics(name, Ok(Some(m))) => {
                 self.metrics.insert(name, m);
@@ -652,7 +764,7 @@ pub async fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> 
                 // Also refresh logs/metrics for the selected sandbox
                 if let Some(sb) = app.selected_sandbox().cloned() {
                     match app.tab {
-                        DetailTab::Logs => app.request_logs(&sb.name),
+                        DetailTab::Logs => app.sync_log_stream(),
                         DetailTab::Metrics => app.request_metrics(&sb.name),
                         DetailTab::Filesystem => {
                             let path = app.fs_path.clone();
@@ -688,10 +800,13 @@ pub async fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> 
 pub(crate) fn handle_event(app: &mut App, event: Event) {
     let Event::Key(key) = event else { return };
 
-    // Only act on key presses or repeats; ignore all release events.
+    // Only act on key presses or repeats; ignore all release events, except
+    // for Esc — some terminals (notably on Windows) only emit a release
+    // event for the Esc key, so treating it like every other release would
+    // make Esc silently do nothing on those terminals.
     // This ensures every physical keypress is handled exactly once,
     // regardless of how many events the terminal emits per keystroke.
-    if key.kind == KeyEventKind::Release {
+    if key.kind == KeyEventKind::Release && key.code != KeyCode::Esc {
         return;
     }
 
@@ -844,8 +959,7 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                 return;
             }
             // Managed fields (ports, env vars, workdir) don't accept direct text input.
-            if app.create_dialog.tab == DialogTab::Basic
-                && matches!(app.create_dialog.field, 4 | 5 | 6)
+            if app.create_dialog.tab == DialogTab::Basic && matches!(app.create_dialog.field, 4..=6)
             {
                 return;
             }
@@ -890,7 +1004,11 @@ fn handle_picker_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
             }
         }
         KeyCode::Enter => {
-            let entry = picker.entries.get(picker.selected).cloned().unwrap_or_default();
+            let entry = picker
+                .entries
+                .get(picker.selected)
+                .cloned()
+                .unwrap_or_default();
             if entry == DRIVES_ENTRY {
                 picker.show_drives();
             } else if picker.showing_drives {
@@ -1280,7 +1398,7 @@ fn on_sandbox_selected(app: &mut App) {
     app.fs_path = "/".into();
     if let Some(sb) = app.selected_sandbox().cloned() {
         match app.tab {
-            DetailTab::Logs => app.request_logs(&sb.name),
+            DetailTab::Logs => app.sync_log_stream(),
             DetailTab::Metrics => app.request_metrics(&sb.name),
             DetailTab::Filesystem => {
                 let path = app.fs_path.clone();
@@ -1294,7 +1412,7 @@ fn on_sandbox_selected(app: &mut App) {
 fn on_tab_switched(app: &mut App) {
     if let Some(sb) = app.selected_sandbox().cloned() {
         match app.tab {
-            DetailTab::Logs => app.request_logs(&sb.name),
+            DetailTab::Logs => app.sync_log_stream(),
             DetailTab::Metrics => app.request_metrics(&sb.name),
             DetailTab::Filesystem => {
                 let path = app.fs_path.clone();
@@ -1504,6 +1622,76 @@ mod tests {
         assert!(app.new_sandbox_selected());
     }
 
+    // ── log_stream_target ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_log_stream_target_none_when_not_on_logs_tab() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("alpha", Status::Running));
+        app.tab = DetailTab::Metrics;
+        assert!(app.log_stream_target().is_none());
+    }
+
+    #[test]
+    fn test_log_stream_target_none_when_sandbox_stopped() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("alpha", Status::Stopped));
+        app.tab = DetailTab::Logs;
+        assert!(app.log_stream_target().is_none());
+    }
+
+    #[test]
+    fn test_log_stream_target_some_when_running_on_logs_tab() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("alpha", Status::Running));
+        app.tab = DetailTab::Logs;
+        assert_eq!(app.log_stream_target().as_deref(), Some("alpha"));
+    }
+
+    #[test]
+    fn test_log_stream_target_none_when_no_sandbox_selected() {
+        let app = make_app();
+        assert!(app.log_stream_target().is_none());
+    }
+
+    // ── LogStreamEntry message handling ──────────────────────────────────────
+
+    #[test]
+    fn test_handle_message_log_stream_entry_appends() {
+        use microsandbox::logs::LogCursor;
+        use microsandbox::sandbox::{LogEntry, LogSource};
+
+        let mut app = make_app();
+        let entry = LogEntry {
+            timestamp: chrono::Utc::now(),
+            source: LogSource::Stdout,
+            session_id: None,
+            data: b"hello".as_slice().into(),
+            cursor: LogCursor::empty(),
+        };
+        app.handle_message(AppMessage::LogStreamEntry("alpha".into(), entry));
+        assert_eq!(app.logs.get("alpha").map(|v| v.len()), Some(1));
+    }
+
+    #[test]
+    fn test_handle_message_log_stream_entry_caps_at_max_lines() {
+        use microsandbox::logs::LogCursor;
+        use microsandbox::sandbox::{LogEntry, LogSource};
+
+        let mut app = make_app();
+        for _ in 0..(MAX_LOG_LINES + 10) {
+            let entry = LogEntry {
+                timestamp: chrono::Utc::now(),
+                source: LogSource::Stdout,
+                session_id: None,
+                data: b"x".as_slice().into(),
+                cursor: LogCursor::empty(),
+            };
+            app.handle_message(AppMessage::LogStreamEntry("alpha".into(), entry));
+        }
+        assert_eq!(app.logs.get("alpha").map(|v| v.len()), Some(MAX_LOG_LINES));
+    }
+
     // ── select_next / select_prev ────────────────────────────────────────────
 
     #[test]
@@ -1662,6 +1850,8 @@ mod tests {
         dlg.next_field();
         assert_eq!(dlg.field, 6);
         dlg.next_field();
+        assert_eq!(dlg.field, 7); // Create button
+        dlg.next_field();
         assert_eq!(dlg.field, 0);
     }
 
@@ -1675,17 +1865,19 @@ mod tests {
         dlg.current_field_mut().unwrap().push_str("ubuntu");
         assert_eq!(dlg.image, "alpineubuntu");
         dlg.field = 2;
-        dlg.current_field_mut().unwrap().push_str("4");
+        dlg.current_field_mut().unwrap().push('4');
         assert_eq!(dlg.cpus, "14");
         dlg.field = 3;
         dlg.current_field_mut().unwrap().push_str("1024");
         assert_eq!(dlg.memory, "5121024");
+        // Fields 4 (ports), 5 (env vars), and 6 (workdir) are managed by
+        // sub-dialogs / the directory picker rather than direct text input.
+        dlg.field = 4;
+        assert!(dlg.current_field_mut().is_none());
         dlg.field = 5;
-        dlg.current_field_mut().unwrap().push_str("FOO=bar");
-        assert_eq!(dlg.env_vars, "FOO=bar");
+        assert!(dlg.current_field_mut().is_none());
         dlg.field = 6;
-        dlg.current_field_mut().unwrap().push_str("/workspace");
-        assert_eq!(dlg.workdir, "/workspace");
+        assert!(dlg.current_field_mut().is_none());
     }
 
     // ── DetailTab helpers ────────────────────────────────────────────────────
@@ -1941,7 +2133,7 @@ mod tests {
         app.create_dialog = CreateDialog::open();
         // field == 0
         handle_event(&mut app, key_press(KeyCode::BackTab));
-        assert_eq!(app.create_dialog.field, 6);
+        assert_eq!(app.create_dialog.field, 7); // Create button
     }
 
     #[test]
@@ -1967,6 +2159,8 @@ mod tests {
         let mut app = make_app();
         app.create_dialog = CreateDialog::open();
         app.create_dialog.name = "".into();
+
+        app.create_dialog.field = app.create_dialog.form_field_count(); // Create button
         handle_event(&mut app, key_press(KeyCode::Enter));
         assert!(app.create_dialog.error.is_some());
         // Dialog stays open on validation error
@@ -1979,6 +2173,8 @@ mod tests {
         app.create_dialog = CreateDialog::open();
         app.create_dialog.name = "mybox".into();
         app.create_dialog.image = "".into();
+
+        app.create_dialog.field = app.create_dialog.form_field_count(); // Create button
         handle_event(&mut app, key_press(KeyCode::Enter));
         assert!(app.create_dialog.error.is_some());
         assert!(app.create_dialog.visible);
@@ -2010,25 +2206,46 @@ mod tests {
     }
 
     #[test]
-    fn test_dialog_ports_text_field() {
+    fn test_dialog_ports_sub_dialog_add_entry() {
         let mut app = make_app();
         app.create_dialog = CreateDialog::open();
         app.create_dialog.field = 4;
-        for ch in "8080:80".chars() {
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        assert!(app.create_dialog.ports_dialog.visible);
+        handle_event(&mut app, key_press(KeyCode::Char('a')));
+        for ch in "8080".chars() {
             handle_event(&mut app, key_press(KeyCode::Char(ch)));
         }
-        assert_eq!(app.create_dialog.ports, "8080:80");
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        for ch in "80".chars() {
+            handle_event(&mut app, key_press(KeyCode::Char(ch)));
+        }
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        handle_event(&mut app, key_press(KeyCode::Esc));
+        assert_eq!(app.create_dialog.ports, vec![(8080, 80)]);
     }
 
     #[test]
-    fn test_dialog_env_vars_text_field() {
+    fn test_dialog_env_vars_sub_dialog_add_entry() {
         let mut app = make_app();
         app.create_dialog = CreateDialog::open();
         app.create_dialog.field = 5;
-        for ch in "FOO=bar".chars() {
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        assert!(app.create_dialog.env_vars_dialog.visible);
+        handle_event(&mut app, key_press(KeyCode::Char('a')));
+        for ch in "FOO".chars() {
             handle_event(&mut app, key_press(KeyCode::Char(ch)));
         }
-        assert_eq!(app.create_dialog.env_vars, "FOO=bar");
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        for ch in "bar".chars() {
+            handle_event(&mut app, key_press(KeyCode::Char(ch)));
+        }
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        handle_event(&mut app, key_press(KeyCode::Esc));
+        assert_eq!(
+            app.create_dialog.env_vars,
+            vec![("FOO".to_string(), "bar".to_string())]
+        );
     }
 
     #[test]
@@ -2058,25 +2275,11 @@ mod tests {
         let mut app = make_app();
         app.create_dialog = CreateDialog::open();
         app.create_dialog.name = "mybox".into();
-        app.create_dialog.ports = "8080:80 443:443".into();
+        app.create_dialog.ports = vec![(8080, 80), (443, 443)];
+
+        app.create_dialog.field = app.create_dialog.form_field_count(); // Create button
         handle_event(&mut app, key_press(KeyCode::Enter));
         assert!(!app.create_dialog.visible);
-    }
-
-    #[test]
-    fn test_submit_rejects_invalid_port_format() {
-        let mut app = make_app();
-        app.create_dialog = CreateDialog::open();
-        app.create_dialog.name = "mybox".into();
-        app.create_dialog.ports = "invalid".into();
-        handle_event(&mut app, key_press(KeyCode::Enter));
-        assert!(app.create_dialog.visible);
-        assert!(app
-            .create_dialog
-            .error
-            .as_deref()
-            .unwrap_or("")
-            .contains("Port 'invalid'"));
     }
 
     // ── handle_event: focus & navigation ────────────────────────────────────
@@ -2362,7 +2565,7 @@ mod tests {
     fn test_dialog_down_wraps_from_last_to_first() {
         let mut app = make_app();
         app.create_dialog = CreateDialog::open();
-        app.create_dialog.field = 6;
+        app.create_dialog.field = 7; // Create button (last position)
         handle_event(&mut app, key_press(KeyCode::Down));
         assert_eq!(app.create_dialog.field, 0);
     }
@@ -2382,7 +2585,7 @@ mod tests {
         app.create_dialog = CreateDialog::open();
         app.create_dialog.field = 0;
         handle_event(&mut app, key_press(KeyCode::Up));
-        assert_eq!(app.create_dialog.field, 6);
+        assert_eq!(app.create_dialog.field, 7); // Create button
     }
 
     // ── dialog: digit-only filtering for CPUs and Memory ────────────────────
@@ -2452,6 +2655,8 @@ mod tests {
         app.create_dialog = CreateDialog::open();
         app.create_dialog.name = "mybox".into();
         app.create_dialog.cpus = "0".into();
+
+        app.create_dialog.field = app.create_dialog.form_field_count(); // Create button
         handle_event(&mut app, key_press(KeyCode::Enter));
         assert!(
             app.create_dialog.visible,
@@ -2470,6 +2675,8 @@ mod tests {
         app.create_dialog = CreateDialog::open();
         app.create_dialog.name = "mybox".into();
         app.create_dialog.cpus = "33".into();
+
+        app.create_dialog.field = app.create_dialog.form_field_count(); // Create button
         handle_event(&mut app, key_press(KeyCode::Enter));
         assert!(app.create_dialog.visible);
         assert!(app.create_dialog.error.is_some());
@@ -2481,6 +2688,8 @@ mod tests {
         app.create_dialog = CreateDialog::open();
         app.create_dialog.name = "mybox".into();
         app.create_dialog.memory = "32".into();
+
+        app.create_dialog.field = app.create_dialog.form_field_count(); // Create button
         handle_event(&mut app, key_press(KeyCode::Enter));
         assert!(app.create_dialog.visible);
         let err = app.create_dialog.error.as_deref().unwrap_or("");

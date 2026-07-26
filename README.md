@@ -11,7 +11,8 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 - **Lifecycle management** — create, start, stop, kill, and remove sandboxes from the
   keyboard
 - **Logs tab** — scrollable, colour-coded log output by source (stdout / stderr / pty /
-  system)
+  system); live-tails new output for running sandboxes via the SDK's log-streaming API
+  (falls back to a one-shot read for stopped sandboxes)
 - **Metrics tab** — live CPU and memory gauges, disk I/O counters, network rx/tx, uptime
 - **Filesystem tab** — browse the sandbox filesystem; navigate into directories with
   `Enter`, go up with `Backspace`

@@ -84,11 +84,11 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     // --- Memory gauge ---
     let mem_total_mib = sb_info.memory_mib as u64;
     let mem_used_mib = m.memory_bytes / 1_048_576;
-    let mem_pct = if mem_total_mib > 0 {
-        (mem_used_mib * 100 / mem_total_mib).min(100)
-    } else {
-        0
-    };
+    let mem_pct = mem_used_mib
+        .checked_mul(100)
+        .and_then(|v| v.checked_div(mem_total_mib))
+        .unwrap_or(0)
+        .min(100);
     let mem_color = gauge_color(mem_pct as f64);
     f.render_widget(
         Gauge::default()
