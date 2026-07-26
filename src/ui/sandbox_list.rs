@@ -82,6 +82,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
                 &app.sandboxes[abs_idx],
                 selected,
                 panel_focused,
+                app.marked.contains(&app.sandboxes[abs_idx].name),
                 card_area,
             );
             y += CARD_TOTAL_HEIGHT;
@@ -107,6 +108,7 @@ fn render_sandbox_card(
     sb: &SandboxInfo,
     selected: bool,
     panel_focused: bool,
+    marked: bool,
     area: Rect,
 ) {
     let (status_color, status_dot) = status_style(sb.status);
@@ -114,6 +116,8 @@ fn render_sandbox_card(
     let highlight = selected && panel_focused;
     let border_color = if highlight {
         Color::Cyan
+    } else if marked {
+        Color::Yellow
     } else {
         Color::DarkGray
     };
@@ -139,8 +143,14 @@ fn render_sandbox_card(
         return;
     }
 
-    // Line 1: status dot + name (+ selected checkmark)
+    // Line 1: mark checkbox + status dot + name (+ selected checkmark)
     let name_line = Line::from(vec![
+        Span::styled(
+            if marked { "☑ " } else { "" },
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(status_dot, Style::default().fg(status_color)),
         Span::raw(" "),
         Span::styled(

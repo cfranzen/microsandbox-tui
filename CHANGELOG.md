@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mounts, applied via the sandbox builder's `.volume(...)` at creation time.
   As with network policy, existing sandboxes' mounts cannot be changed after
   creation — documented as a known SDK limitation.
+- Multi-select bulk operations: press `Space` on a sandbox in the list to
+  mark/unmark it (shown with a `☑` prefix and a yellow card border). When one
+  or more sandboxes are marked, `s`/`S`/`K`/`d` apply Start/Stop/Kill/Remove
+  to all marked sandboxes concurrently (filtered to the ones eligible for
+  that action, e.g. only stopped sandboxes are started) instead of the
+  highlighted sandbox, and a single summary notification reports how many
+  succeeded. Marks are cleared after the bulk action runs and are
+  automatically pruned if a marked sandbox disappears from a refreshed list.
 
 ## [0.1.0] - 2026-07-25
 

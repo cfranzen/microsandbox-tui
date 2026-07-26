@@ -10,6 +10,9 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
   with image, CPU/memory config, and age
 - **Lifecycle management** — create, start, stop, kill, and remove sandboxes from the
   keyboard
+- **Multi-select bulk operations** — mark multiple sandboxes with `Space` (shown with a
+  `☑` prefix and yellow border) and apply Start/Stop/Kill/Remove to all marked
+  sandboxes at once; actions run concurrently and report a single summary notification
 - **Logs tab** — scrollable, colour-coded log output by source (stdout / stderr / pty /
   system); live-tails new output for running sandboxes via the SDK's log-streaming API
   (falls back to a one-shot read for stopped sandboxes)
@@ -47,13 +50,20 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 | `→` / `l` | Next detail tab *(detail panel focus only)* |
 | `Enter` | Open "New Sandbox" dialog (when placeholder is selected) or switch focus to detail panel |
 | `n` | Open "New Sandbox" dialog |
-| `s` | Start selected sandbox *(list focus only)* |
-| `S` | Stop selected sandbox *(list focus only)* |
-| `K` | Kill selected sandbox (SIGKILL) *(list focus only)* |
-| `d` | Remove selected sandbox *(list focus only)* |
+| `Space` | Mark/unmark the highlighted sandbox for a bulk action *(list focus only)* |
+| `s` | Start selected sandbox, or all marked sandboxes if any are marked *(list focus only)* |
+| `S` | Stop selected sandbox, or all marked sandboxes if any are marked *(list focus only)* |
+| `K` | Kill selected sandbox (SIGKILL), or all marked sandboxes if any are marked *(list focus only)* |
+| `d` | Remove selected sandbox, or all marked sandboxes if any are marked *(list focus only)* |
 | `v` | Open Volumes view |
 | `r` | Force refresh |
 | `Backspace` | Navigate up one directory *(Filesystem tab only)* |
+
+Bulk actions only apply to marked sandboxes that are eligible for that action (e.g. `s`
+only starts marked sandboxes that are stopped, `d` only removes marked sandboxes that
+aren't running); ineligible marks are skipped and reported in the summary count. Marks
+are cleared once a bulk action is dispatched and are automatically dropped if a marked
+sandbox is removed elsewhere.
 
 ### Create dialog
 

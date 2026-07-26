@@ -126,6 +126,8 @@ pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         use crate::app::Focus;
         if app.focus == Focus::SandboxList && !app.new_sandbox_selected() {
             spans.extend([
+                Span::styled("Space", key),
+                Span::styled(" mark  ", dim),
                 Span::styled("s", key),
                 Span::styled(" start  ", dim),
                 Span::styled("S", key),

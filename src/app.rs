@@ -523,6 +523,10 @@ pub struct App {
     pub sandboxes: Vec<SandboxInfo>,
     /// Index of the selected sandbox in the list.
     pub selected: usize,
+    /// Names of sandboxes marked for bulk operations. When non-empty, the
+    /// start/stop/kill/remove keys apply to every marked sandbox instead of
+    /// only the highlighted one.
+    pub marked: std::collections::HashSet<String>,
     /// Which panel has keyboard focus.
     pub focus: Focus,
     /// Which detail tab is active.
@@ -570,6 +574,7 @@ impl App {
         Self {
             sandboxes: Vec::new(),
             selected: 0,
+            marked: Default::default(),
             focus: Focus::SandboxList,
             tab: DetailTab::Logs,
             log_scroll: 0,
@@ -789,6 +794,32 @@ impl App {
         });
     }
 
+    /// Perform a sandbox action against every sandbox in `names` concurrently,
+    /// then report how many succeeded/failed in a single summary notification.
+    pub fn run_bulk_action(&self, action: SandboxAction, names: Vec<String>) {
+        let tx = self.msg_tx.clone();
+        let total = names.len();
+        tokio::spawn(async move {
+            let futures = names.into_iter().map(|name| async move {
+                match action {
+                    SandboxAction::Start => crate::sandbox::start_sandbox(&name).await,
+                    SandboxAction::Stop => crate::sandbox::stop_sandbox(&name).await,
+                    SandboxAction::Kill => crate::sandbox::kill_sandbox(&name).await,
+                    SandboxAction::Remove => crate::sandbox::remove_sandbox(&name).await,
+                }
+            });
+            let results = futures::future::join_all(futures).await;
+            let failed = results.iter().filter(|r| r.is_err()).count();
+            let succeeded = total - failed;
+            let msg = format!("{action:?}: {succeeded}/{total} succeeded");
+            let _ = tx.send(AppMessage::Notification(msg, failed > 0));
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            if let Ok(list) = crate::sandbox::list_sandboxes().await {
+                let _ = tx.send(AppMessage::SandboxList(Ok(list)));
+            }
+        });
+    }
+
     /// Handle an incoming background message.
     pub fn handle_message(&mut self, msg: AppMessage) {
         match msg {
@@ -803,6 +834,10 @@ impl App {
                         self.selected = self.selected.min(self.sandboxes.len());
                     }
                 }
+                // Drop marks for sandboxes that no longer exist.
+                let existing: std::collections::HashSet<&str> =
+                    self.sandboxes.iter().map(|s| s.name.as_str()).collect();
+                self.marked.retain(|name| existing.contains(name.as_str()));
                 self.last_refresh = Some(Instant::now());
                 self.sync_log_stream();
             }
@@ -1025,6 +1060,9 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
         }
 
         // Sandbox actions (only when focus is on the list)
+        KeyCode::Char(' ') if app.focus == Focus::SandboxList => {
+            toggle_mark(app);
+        }
         KeyCode::Char('s') if app.focus == Focus::SandboxList => {
             action_start(app);
         }
@@ -1949,6 +1987,22 @@ fn request_volume_refresh(app: &App) {
 }
 
 fn action_start(app: &mut App) {
+    if !app.marked.is_empty() {
+        let names: Vec<String> = app
+            .sandboxes
+            .iter()
+            .filter(|sb| app.marked.contains(&sb.name) && sb.status == Status::Stopped)
+            .map(|sb| sb.name.clone())
+            .collect();
+        app.marked.clear();
+        if names.is_empty() {
+            app.notify("No marked sandboxes are stopped", true);
+        } else {
+            app.notify(format!("Starting {} sandboxes…", names.len()), false);
+            app.run_bulk_action(SandboxAction::Start, names);
+        }
+        return;
+    }
     if let Some(sb) = app.selected_sandbox().cloned() {
         if sb.status == Status::Stopped {
             app.run_action(SandboxAction::Start, &sb.name);
@@ -1960,6 +2014,22 @@ fn action_start(app: &mut App) {
 }
 
 fn action_stop(app: &mut App) {
+    if !app.marked.is_empty() {
+        let names: Vec<String> = app
+            .sandboxes
+            .iter()
+            .filter(|sb| app.marked.contains(&sb.name) && sb.status == Status::Running)
+            .map(|sb| sb.name.clone())
+            .collect();
+        app.marked.clear();
+        if names.is_empty() {
+            app.notify("No marked sandboxes are running", true);
+        } else {
+            app.notify(format!("Stopping {} sandboxes…", names.len()), false);
+            app.run_bulk_action(SandboxAction::Stop, names);
+        }
+        return;
+    }
     if let Some(sb) = app.selected_sandbox().cloned() {
         if sb.status == Status::Running {
             app.run_action(SandboxAction::Stop, &sb.name);
@@ -1971,6 +2041,22 @@ fn action_stop(app: &mut App) {
 }
 
 fn action_kill(app: &mut App) {
+    if !app.marked.is_empty() {
+        let names: Vec<String> = app
+            .sandboxes
+            .iter()
+            .filter(|sb| app.marked.contains(&sb.name) && sb.status == Status::Running)
+            .map(|sb| sb.name.clone())
+            .collect();
+        app.marked.clear();
+        if names.is_empty() {
+            app.notify("No marked sandboxes are running", true);
+        } else {
+            app.notify(format!("Killing {} sandboxes…", names.len()), false);
+            app.run_bulk_action(SandboxAction::Kill, names);
+        }
+        return;
+    }
     if let Some(sb) = app.selected_sandbox().cloned() {
         if sb.status == Status::Running {
             app.run_action(SandboxAction::Kill, &sb.name);
@@ -1980,12 +2066,41 @@ fn action_kill(app: &mut App) {
 }
 
 fn action_remove(app: &mut App) {
+    if !app.marked.is_empty() {
+        let names: Vec<String> = app
+            .sandboxes
+            .iter()
+            .filter(|sb| app.marked.contains(&sb.name) && sb.status != Status::Running)
+            .map(|sb| sb.name.clone())
+            .collect();
+        app.marked.clear();
+        if names.is_empty() {
+            app.notify("No marked sandboxes can be removed (stop them first)", true);
+        } else {
+            app.notify(format!("Removing {} sandboxes…", names.len()), false);
+            app.run_bulk_action(SandboxAction::Remove, names);
+        }
+        return;
+    }
     if let Some(sb) = app.selected_sandbox().cloned() {
         if sb.status != Status::Running {
             app.run_action(SandboxAction::Remove, &sb.name);
             app.notify(format!("Removing '{}'…", sb.name), false);
         } else {
             app.notify("Stop the sandbox before removing", true);
+        }
+    }
+}
+
+/// Toggle the mark on the currently highlighted sandbox for bulk operations.
+fn toggle_mark(app: &mut App) {
+    if app.new_sandbox_selected() {
+        return;
+    }
+    if let Some(sb) = app.selected_sandbox() {
+        let name = sb.name.clone();
+        if !app.marked.remove(&name) {
+            app.marked.insert(name);
         }
     }
 }
@@ -3166,6 +3281,93 @@ mod tests {
         app.sandboxes.push(make_sandbox("box1", Status::Running));
         handle_event(&mut app, key_press(KeyCode::Char('d')));
         assert!(app.notification.as_ref().unwrap().is_error);
+    }
+
+    // ── handle_event: multi-select mark & bulk actions ───────────────────────
+
+    #[test]
+    fn test_space_toggles_mark_on_selected_sandbox() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box1", Status::Stopped));
+        app.selected = 0;
+        handle_event(&mut app, key_press(KeyCode::Char(' ')));
+        assert!(app.marked.contains("box1"));
+        handle_event(&mut app, key_press(KeyCode::Char(' ')));
+        assert!(!app.marked.contains("box1"));
+    }
+
+    #[test]
+    fn test_space_on_new_sandbox_slot_does_nothing() {
+        let mut app = make_app();
+        // selected == 0 == len() → new sandbox slot, no real sandbox to mark
+        handle_event(&mut app, key_press(KeyCode::Char(' ')));
+        assert!(app.marked.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_bulk_start_uses_marked_sandboxes_and_clears_marks() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box1", Status::Stopped));
+        app.sandboxes.push(make_sandbox("box2", Status::Stopped));
+        app.marked.insert("box1".to_string());
+        app.marked.insert("box2".to_string());
+        handle_event(&mut app, key_press(KeyCode::Char('s')));
+        assert!(app.marked.is_empty());
+        let n = app.notification.as_ref().unwrap();
+        assert!(!n.is_error);
+        assert!(n.message.contains("2"));
+    }
+
+    #[tokio::test]
+    async fn test_bulk_start_ignores_marked_sandboxes_not_stopped() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box1", Status::Running));
+        app.marked.insert("box1".to_string());
+        handle_event(&mut app, key_press(KeyCode::Char('s')));
+        assert!(app.marked.is_empty());
+        assert!(app.notification.as_ref().unwrap().is_error);
+    }
+
+    #[tokio::test]
+    async fn test_bulk_stop_filters_to_running_marked_sandboxes() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box1", Status::Running));
+        app.sandboxes.push(make_sandbox("box2", Status::Stopped));
+        app.marked.insert("box1".to_string());
+        app.marked.insert("box2".to_string());
+        handle_event(&mut app, key_press(KeyCode::Char('S')));
+        assert!(app.marked.is_empty());
+        let n = app.notification.as_ref().unwrap();
+        assert!(!n.is_error);
+        assert!(n.message.contains('1'));
+    }
+
+    #[tokio::test]
+    async fn test_bulk_remove_filters_to_non_running_marked_sandboxes() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box1", Status::Stopped));
+        app.sandboxes.push(make_sandbox("box2", Status::Running));
+        app.marked.insert("box1".to_string());
+        app.marked.insert("box2".to_string());
+        handle_event(&mut app, key_press(KeyCode::Char('d')));
+        assert!(app.marked.is_empty());
+        let n = app.notification.as_ref().unwrap();
+        assert!(!n.is_error);
+        assert!(n.message.contains('1'));
+    }
+
+    #[test]
+    fn test_sandbox_list_refresh_prunes_stale_marks() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box1", Status::Stopped));
+        app.marked.insert("box1".to_string());
+        app.marked.insert("gone".to_string());
+        app.handle_message(AppMessage::SandboxList(Ok(vec![make_sandbox(
+            "box1",
+            Status::Stopped,
+        )])));
+        assert!(app.marked.contains("box1"));
+        assert!(!app.marked.contains("gone"));
     }
 
     #[tokio::test]
