@@ -4,10 +4,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
-use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    Event, EventStream, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind,
+};
 use futures::StreamExt;
 use microsandbox::sandbox::LogEntry;
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
@@ -67,6 +71,27 @@ impl DetailTab {
             DetailTab::Info,
         ]
     }
+}
+
+/// Screen regions recorded during the most recent render, used to translate
+/// mouse clicks/scrolls into the equivalent keyboard actions.
+#[derive(Debug, Clone, Default)]
+pub struct MouseRegions {
+    /// Bounding rect of the sandbox list panel.
+    pub list_area: Rect,
+    /// Bounding rect of the detail panel.
+    pub detail_area: Rect,
+    /// Rects for each rendered sandbox card, in display order. `None` marks
+    /// the "New Sandbox" placeholder card; `Some(i)` is an index into
+    /// `App::sandboxes`.
+    pub card_rects: Vec<(Rect, Option<usize>)>,
+    /// Rects for each tab label in the detail panel's tab bar.
+    pub tab_rects: Vec<(Rect, DetailTab)>,
+}
+
+/// Returns true if the point `(x, y)` falls within `rect`.
+fn point_in_rect(x: u16, y: u16, rect: Rect) -> bool {
+    rect.x <= x && x < rect.x + rect.width && rect.y <= y && y < rect.y + rect.height
 }
 
 /// State of the "create new sandbox" modal dialog.
@@ -601,6 +626,8 @@ pub struct App {
     /// Default sandbox parameters loaded from the user's config file, used
     /// to prefill the "New Sandbox" dialog.
     pub config: AppConfig,
+    /// Screen regions from the most recent render, for mouse hit-testing.
+    pub mouse: MouseRegions,
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -633,6 +660,7 @@ impl App {
             log_stream_task: None,
             log_stream_name: None,
             config: AppConfig::load(),
+            mouse: MouseRegions::default(),
         }
     }
 
@@ -1055,7 +1083,14 @@ pub async fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> 
 //--------------------------------------------------------------------------------------------------
 
 pub(crate) fn handle_event(app: &mut App, event: Event) {
-    let Event::Key(key) = event else { return };
+    let key = match event {
+        Event::Key(key) => key,
+        Event::Mouse(mouse) => {
+            handle_mouse_event(app, mouse);
+            return;
+        }
+        _ => return,
+    };
 
     // Only act on key presses or repeats; ignore all release events, except
     // for Esc — some terminals (notably on Windows) only emit a release
@@ -1190,6 +1225,70 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
 
         _ => {}
     }
+}
+
+/// Translate a mouse event into the equivalent list/detail-panel action.
+/// Ignored while a modal dialog or the search box is active, to keep scope
+/// limited to the main view (list selection, tab switching, scrolling).
+fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+    if app.create_dialog.visible || app.volumes_view.visible || app.search_active {
+        return;
+    }
+
+    let (x, y) = (mouse.column, mouse.row);
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if let Some(tab) = tab_at(app, x, y) {
+                app.tab = tab;
+                app.focus = Focus::Detail;
+                on_tab_switched(app);
+            } else if let Some(target) = card_at(app, x, y) {
+                app.selected = target.unwrap_or(app.sandboxes.len());
+                app.focus = Focus::SandboxList;
+                on_sandbox_selected(app);
+            } else if point_in_rect(x, y, app.mouse.detail_area) {
+                app.focus = Focus::Detail;
+            } else if point_in_rect(x, y, app.mouse.list_area) {
+                app.focus = Focus::SandboxList;
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if point_in_rect(x, y, app.mouse.list_area) {
+                app.select_prev();
+                on_sandbox_selected(app);
+            } else if point_in_rect(x, y, app.mouse.detail_area) {
+                scroll_up(app);
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if point_in_rect(x, y, app.mouse.list_area) {
+                app.select_next();
+                on_sandbox_selected(app);
+            } else if point_in_rect(x, y, app.mouse.detail_area) {
+                scroll_down(app);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Returns the detail tab whose rendered rect contains `(x, y)`, if any.
+fn tab_at(app: &App, x: u16, y: u16) -> Option<DetailTab> {
+    app.mouse
+        .tab_rects
+        .iter()
+        .find(|(rect, _)| point_in_rect(x, y, *rect))
+        .map(|(_, tab)| *tab)
+}
+
+/// Returns the sandbox card whose rendered rect contains `(x, y)`, if any.
+/// `Some(None)` is the "New Sandbox" placeholder card.
+fn card_at(app: &App, x: u16, y: u16) -> Option<Option<usize>> {
+    app.mouse
+        .card_rects
+        .iter()
+        .find(|(rect, _)| point_in_rect(x, y, *rect))
+        .map(|(_, idx)| *idx)
 }
 
 fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
@@ -2308,6 +2407,16 @@ mod tests {
             modifiers: KeyModifiers::NONE,
             kind: KeyEventKind::Release,
             state: KeyEventState::NONE,
+        })
+    }
+
+    /// Build a mouse Event at the given column/row.
+    fn mouse_event(kind: MouseEventKind, column: u16, row: u16) -> Event {
+        Event::Mouse(MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
         })
     }
 
@@ -3619,6 +3728,98 @@ mod tests {
         assert!(app.new_sandbox_selected());
         app.filter = "alpha".to_string();
         assert!(!app.new_sandbox_selected());
+    }
+
+    // ── handle_event: mouse support ──────────────────────────────────────────
+
+    #[test]
+    fn test_mouse_click_on_card_selects_it() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box0", Status::Stopped));
+        app.sandboxes.push(make_sandbox("box1", Status::Stopped));
+        app.mouse.card_rects = vec![
+            (Rect::new(0, 0, 10, 6), Some(0)),
+            (Rect::new(0, 6, 10, 6), Some(1)),
+        ];
+        app.selected = 0;
+        handle_event(
+            &mut app,
+            mouse_event(MouseEventKind::Down(MouseButton::Left), 3, 7),
+        );
+        assert_eq!(app.selected, 1);
+        assert_eq!(app.focus, Focus::SandboxList);
+    }
+
+    #[tokio::test]
+    async fn test_mouse_click_on_tab_switches_tab_and_focus() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box0", Status::Running));
+        app.mouse.tab_rects = vec![
+            (Rect::new(0, 0, 8, 1), DetailTab::Logs),
+            (Rect::new(8, 0, 10, 1), DetailTab::Metrics),
+        ];
+        app.tab = DetailTab::Logs;
+        handle_event(
+            &mut app,
+            mouse_event(MouseEventKind::Down(MouseButton::Left), 9, 0),
+        );
+        assert_eq!(app.tab, DetailTab::Metrics);
+        assert_eq!(app.focus, Focus::Detail);
+    }
+
+    #[test]
+    fn test_mouse_scroll_over_list_moves_selection() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box0", Status::Stopped));
+        app.sandboxes.push(make_sandbox("box1", Status::Stopped));
+        app.mouse.list_area = Rect::new(0, 0, 20, 20);
+        app.selected = 0;
+        handle_event(&mut app, mouse_event(MouseEventKind::ScrollDown, 2, 2));
+        assert_eq!(app.selected, 1);
+        handle_event(&mut app, mouse_event(MouseEventKind::ScrollUp, 2, 2));
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn test_mouse_scroll_over_detail_scrolls_logs() {
+        let mut app = make_app();
+        app.mouse.detail_area = Rect::new(20, 0, 20, 20);
+        app.tab = DetailTab::Logs;
+        app.log_scroll = 5;
+        handle_event(&mut app, mouse_event(MouseEventKind::ScrollDown, 21, 2));
+        assert_eq!(app.log_scroll, 8);
+        handle_event(&mut app, mouse_event(MouseEventKind::ScrollUp, 21, 2));
+        assert_eq!(app.log_scroll, 5);
+    }
+
+    #[test]
+    fn test_mouse_ignored_while_dialog_open() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box0", Status::Stopped));
+        app.create_dialog.visible = true;
+        app.mouse.card_rects = vec![(Rect::new(0, 0, 10, 6), Some(0))];
+        app.selected = 0;
+        handle_event(
+            &mut app,
+            mouse_event(MouseEventKind::Down(MouseButton::Left), 3, 3),
+        );
+        // Selection must not change while the modal dialog steals input.
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn test_mouse_click_on_new_sandbox_card_selects_placeholder() {
+        let mut app = make_app();
+        app.sandboxes.push(make_sandbox("box0", Status::Stopped));
+        app.mouse.card_rects = vec![
+            (Rect::new(0, 0, 10, 6), Some(0)),
+            (Rect::new(0, 6, 10, 3), None),
+        ];
+        handle_event(
+            &mut app,
+            mouse_event(MouseEventKind::Down(MouseButton::Left), 3, 7),
+        );
+        assert!(app.new_sandbox_selected());
     }
 
     #[tokio::test]

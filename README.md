@@ -18,6 +18,8 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
   active filter is shown in the panel title and stays applied until cleared with `Esc`
 - **Config file** — optional TOML config at the platform config directory prefills the
   create-dialog's defaults (image, CPUs, memory, hostname, workdir, user, shell)
+- **Mouse support** — click a sandbox card to select it, click a detail tab to switch to
+  it, and scroll the wheel over the list or detail panel to navigate/scroll
 - **Logs tab** — scrollable, colour-coded log output by source (stdout / stderr / pty /
   system); live-tails new output for running sandboxes via the SDK's log-streaming API
   (falls back to a one-shot read for stopped sandboxes)
@@ -80,6 +82,18 @@ e.g. `web status:running`). Press `Enter` to confirm the filter and return keybo
 focus to the list (the filter stays active), or `Esc` to clear the filter and exit
 search mode. While a filter is active, the "New Sandbox" placeholder is hidden and the
 panel title shows the current filter text.
+
+#### Mouse support
+
+- Click a sandbox card to select it.
+- Click a detail tab label (Logs / Metrics / Filesystem / Info) to switch to it and
+  focus the detail panel.
+- Click anywhere else in the list or detail panel to focus that panel.
+- Scroll the wheel over the sandbox list to move the selection up/down.
+- Scroll the wheel over the detail panel to scroll the Logs or Filesystem view.
+
+Mouse input is ignored while the create-sandbox dialog, Volumes view, or search box is
+active, so it never interferes with those modal flows.
 
 ### Create dialog
 

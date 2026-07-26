@@ -52,6 +52,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   user, and shell, used to prefill the "New Sandbox" dialog. A missing file
   falls back to the existing built-in defaults without erroring. Adds the
   `toml` and `dirs` crates as dependencies.
+- Mouse support: click a sandbox card to select it, click a detail tab
+  (Logs/Metrics/Filesystem/Info) to switch to it, and scroll the wheel over
+  the list or detail panel to move the selection or scroll content. Mouse
+  capture is enabled/disabled alongside raw mode in the terminal setup, and
+  mouse input is ignored while the create dialog, Volumes view, or search
+  box is active.
 
 ## [0.1.0] - 2026-07-25
 

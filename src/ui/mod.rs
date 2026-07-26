@@ -17,6 +17,8 @@ use crate::app::App;
 /// Render the complete TUI for one frame.
 pub fn render(f: &mut Frame, app: &mut App) {
     let (list_area, detail_area, header_area, footer_area) = layout::split(f.area());
+    app.mouse.list_area = list_area;
+    app.mouse.detail_area = detail_area;
 
     layout::render_header(f, header_area);
     sandbox_list::render(f, app, list_area);

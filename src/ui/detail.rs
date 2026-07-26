@@ -81,8 +81,10 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     render_tab_content(f, app, splits[3]);
 }
 
-fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
+fn render_tab_bar(f: &mut Frame, app: &mut App, area: Rect) {
     let mut spans: Vec<Span> = Vec::new();
+    app.mouse.tab_rects.clear();
+    let mut x = area.x;
 
     for &tab in DetailTab::all() {
         let active = tab == app.tab;
@@ -94,8 +96,21 @@ fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
         } else {
             Style::default().fg(Color::DarkGray)
         };
-        spans.push(Span::styled(format!(" {} ", tab.title()), style));
+        let label = format!(" {} ", tab.title());
+        let label_width = label.chars().count() as u16;
+        spans.push(Span::styled(label, style));
         spans.push(Span::raw("  "));
+
+        if x < area.x + area.width {
+            let rect = Rect {
+                x,
+                y: area.y,
+                width: label_width.min(area.x + area.width - x),
+                height: 1,
+            };
+            app.mouse.tab_rects.push((rect, tab));
+        }
+        x += label_width + 2;
     }
 
     // Show ←/→ hint when detail is focused

@@ -62,6 +62,8 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let show_new_card = app.filter.trim().is_empty();
     let total_items = visible.len() + usize::from(show_new_card);
 
+    app.mouse.card_rects.clear();
+
     if total_items == 0 {
         let msg = Line::from(Span::styled(
             "No sandboxes match the filter",
@@ -101,6 +103,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
                 width: w,
                 height: CARD_TOTAL_HEIGHT,
             };
+            app.mouse.card_rects.push((card_area, Some(abs_idx)));
             render_sandbox_card(
                 f,
                 &app.sandboxes[abs_idx],
@@ -121,6 +124,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
                 width: w,
                 height: NEW_CARD_HEIGHT,
             };
+            app.mouse.card_rects.push((card_area, None));
             render_new_sandbox_card(f, selected, panel_focused, card_area);
         }
     }
