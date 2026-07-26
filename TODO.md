@@ -155,5 +155,5 @@ A Rust TUI application for managing MicroSandboxes, built with [ratatui](https:/
 - [x] Volume/mount management
 - [x] Multiple sandbox selection for bulk operations
 - [x] Search/filter sandboxes by name or status
-- [ ] Config file for default sandbox parameters
+- [x] Config file for default sandbox parameters
 - [ ] Mouse support

@@ -11,6 +11,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
+use crate::config::AppConfig;
 use crate::sandbox::{
     FsEntry, MetricsSnapshot, MountSource, NetRuleAction, NetRuleDirection, NetworkRule,
     SandboxInfo, SandboxStatus as Status, VolumeInfo, VolumeMountConfig,
@@ -390,6 +391,35 @@ impl CreateDialog {
         }
     }
 
+    /// Open the dialog, prefilling fields from the user's config file where
+    /// present, falling back to the built-in defaults from [`Self::open`]
+    /// for any field the config file doesn't specify.
+    pub fn open_with_config(cfg: &AppConfig) -> Self {
+        let mut dlg = Self::open();
+        if let Some(v) = &cfg.image {
+            dlg.image = v.clone();
+        }
+        if let Some(v) = cfg.cpus {
+            dlg.cpus = v.to_string();
+        }
+        if let Some(v) = cfg.memory_mib {
+            dlg.memory = v.to_string();
+        }
+        if let Some(v) = &cfg.hostname {
+            dlg.hostname = v.clone();
+        }
+        if let Some(v) = &cfg.workdir {
+            dlg.workdir = v.clone();
+        }
+        if let Some(v) = &cfg.user {
+            dlg.user = v.clone();
+        }
+        if let Some(v) = &cfg.shell {
+            dlg.shell = v.clone();
+        }
+        dlg
+    }
+
     pub fn form_field_count(&self) -> usize {
         match self.tab {
             DialogTab::Basic => 8, // name image cpus memory ports env_vars workdir mounts
@@ -568,6 +598,9 @@ pub struct App {
     log_stream_task: Option<tokio::task::JoinHandle<()>>,
     /// Name of the sandbox the live log-stream task is currently following.
     log_stream_name: Option<String>,
+    /// Default sandbox parameters loaded from the user's config file, used
+    /// to prefill the "New Sandbox" dialog.
+    pub config: AppConfig,
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -599,6 +632,7 @@ impl App {
             msg_tx,
             log_stream_task: None,
             log_stream_name: None,
+            config: AppConfig::load(),
         }
     }
 
@@ -1132,13 +1166,13 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
         }
         KeyCode::Enter => {
             if app.new_sandbox_selected() {
-                app.create_dialog = CreateDialog::open();
+                app.create_dialog = CreateDialog::open_with_config(&app.config);
             } else if app.focus == Focus::SandboxList {
                 app.focus = Focus::Detail;
             }
         }
         KeyCode::Char('n') => {
-            app.create_dialog = CreateDialog::open();
+            app.create_dialog = CreateDialog::open_with_config(&app.config);
         }
         KeyCode::Char('v') => {
             app.volumes_view = VolumesView::open();
@@ -3335,6 +3369,42 @@ mod tests {
         // selected == 0 == len() → new sandbox slot
         handle_event(&mut app, key_press(KeyCode::Enter));
         assert!(app.create_dialog.visible);
+    }
+
+    #[test]
+    fn test_new_sandbox_dialog_prefilled_from_config() {
+        let mut app = make_app();
+        app.config = AppConfig::parse(
+            r#"
+                image = "ubuntu:22.04"
+                cpus = 4
+                memory_mib = 2048
+                hostname = "dev-box"
+                workdir = "/workspace"
+                user = "dev"
+                shell = "/bin/bash"
+            "#,
+        )
+        .unwrap();
+        handle_event(&mut app, key_press(KeyCode::Char('n')));
+        assert_eq!(app.create_dialog.image, "ubuntu:22.04");
+        assert_eq!(app.create_dialog.cpus, "4");
+        assert_eq!(app.create_dialog.memory, "2048");
+        assert_eq!(app.create_dialog.hostname, "dev-box");
+        assert_eq!(app.create_dialog.workdir, "/workspace");
+        assert_eq!(app.create_dialog.user, "dev");
+        assert_eq!(app.create_dialog.shell, "/bin/bash");
+    }
+
+    #[test]
+    fn test_new_sandbox_dialog_uses_builtin_defaults_when_config_empty() {
+        let mut app = make_app();
+        assert_eq!(app.config, AppConfig::default());
+        handle_event(&mut app, key_press(KeyCode::Char('n')));
+        assert_eq!(app.create_dialog.image, "alpine");
+        assert_eq!(app.create_dialog.cpus, "1");
+        assert_eq!(app.create_dialog.memory, "512");
+        assert_eq!(app.create_dialog.shell, "/bin/sh");
     }
 
     // ── handle_event: sandbox actions ────────────────────────────────────────

@@ -4,5 +4,6 @@
 //! thin wrapper that sets up the terminal and hands control to [`app::run`].
 
 pub mod app;
+pub mod config;
 pub mod sandbox;
 pub mod ui;

@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   focus to the list (filter stays active); `Esc` clears it. The active
   filter is shown in the panel title, and the "New Sandbox" placeholder is
   hidden while a filter is applied.
+- Config file for default sandbox parameters: an optional TOML file at the
+  platform config directory (e.g. `~/.config/microsandbox-tui/config.toml`
+  on Linux) can set defaults for image, CPUs, memory, hostname, workdir,
+  user, and shell, used to prefill the "New Sandbox" dialog. A missing file
+  falls back to the existing built-in defaults without erroring. Adds the
+  `toml` and `dirs` crates as dependencies.
 
 ## [0.1.0] - 2026-07-25
 

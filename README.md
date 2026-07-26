@@ -16,6 +16,8 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 - **Search/filter** — press `/` to search sandboxes live by substring on name, or use
   `status:running` / `status:stopped` / `status:crashed` tokens to filter by status; the
   active filter is shown in the panel title and stays applied until cleared with `Esc`
+- **Config file** — optional TOML config at the platform config directory prefills the
+  create-dialog's defaults (image, CPUs, memory, hostname, workdir, user, shell)
 - **Logs tab** — scrollable, colour-coded log output by source (stdout / stderr / pty /
   system); live-tails new output for running sandboxes via the SDK's log-streaming API
   (falls back to a one-shot read for stopped sandboxes)
@@ -179,6 +181,28 @@ microsandbox-tui
 
 The TUI connects to the local microsandbox runtime automatically (no server process needed).
 
+## Configuration
+
+Default parameters for the "New Sandbox" dialog can be set in a TOML config file at:
+
+- Linux: `~/.config/microsandbox-tui/config.toml`
+- macOS: `~/Library/Application Support/microsandbox-tui/config.toml`
+- Windows: `%APPDATA%\microsandbox-tui\config.toml`
+
+The file is optional — if it's missing, the built-in defaults (image `alpine`, 1 CPU,
+512 MiB memory, shell `/bin/sh`) are used. Any field you omit falls back to those
+defaults. Example:
+
+```toml
+image = "ubuntu:22.04"
+cpus = 4
+memory_mib = 2048
+hostname = "dev-box"
+workdir = "/workspace"
+user = "dev"
+shell = "/bin/bash"
+```
+
 ## Project Structure
 
 ```
@@ -186,6 +210,7 @@ src/
 ├── main.rs             # Terminal setup/teardown, entry point
 ├── lib.rs              # Library crate root (exposes modules for integration tests)
 ├── app.rs              # Application state, event loop, input handling
+├── config.rs           # TOML config file for default sandbox parameters
 ├── sandbox/
 │   └── mod.rs          # Async SDK wrappers (list, create, start, stop, …)
 └── ui/
