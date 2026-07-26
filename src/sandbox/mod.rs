@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use futures::Stream;
 use microsandbox::logs::{LogStreamOptions, LogStreamStart};
 use microsandbox::sandbox::{FsEntryKind, LogEntry, LogOptions, LogSource};
-use microsandbox::{MicrosandboxError, Sandbox, SandboxMetrics};
+use microsandbox::{MicrosandboxError, NetworkPolicy, Sandbox, SandboxMetrics};
 
 // Re-export for use in other modules
 pub use microsandbox::sandbox::SandboxStatus;
@@ -55,6 +55,50 @@ pub enum LocalFsEntryKind {
     Other,
 }
 
+/// Whether a [`NetworkRule`] permits or blocks matching traffic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NetRuleAction {
+    #[default]
+    Allow,
+    Deny,
+}
+
+impl NetRuleAction {
+    pub fn label(self) -> &'static str {
+        match self {
+            NetRuleAction::Allow => "ALLOW",
+            NetRuleAction::Deny => "DENY",
+        }
+    }
+}
+
+/// Traffic direction a [`NetworkRule`] applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NetRuleDirection {
+    #[default]
+    Egress,
+    Ingress,
+}
+
+impl NetRuleDirection {
+    pub fn label(self) -> &'static str {
+        match self {
+            NetRuleDirection::Egress => "EGRESS",
+            NetRuleDirection::Ingress => "INGRESS",
+        }
+    }
+}
+
+/// A single CIDR-based network policy rule configured at sandbox-creation
+/// time (the SDK does not support modifying network policy on an already
+/// created sandbox — see [`create_sandbox`]'s use of this type).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NetworkRule {
+    pub cidr: String,
+    pub action: NetRuleAction,
+    pub direction: NetRuleDirection,
+}
+
 /// All parameters for creating a new sandbox via the TUI dialog.
 #[derive(Debug, Clone)]
 pub struct CreateConfig {
@@ -71,6 +115,9 @@ pub struct CreateConfig {
     pub max_cpus: Option<u8>,
     pub max_memory_mib: Option<u32>,
     pub disable_network: bool,
+    /// CIDR-based network policy rules applied at creation time. Ignored
+    /// (with `disable_network` taking precedence) when empty.
+    pub network_rules: Vec<NetworkRule>,
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -144,6 +191,36 @@ pub async fn remove_sandbox(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Build a [`NetworkPolicy`] from a list of user-configured CIDR rules.
+///
+/// Starts from an allow-all default (matching the sandbox's normal
+/// networking behaviour) and layers explicit egress/ingress allow/deny
+/// rules on top, evaluated in order. Falls back to [`NetworkPolicy::allow_all`]
+/// if any rule fails to parse (this shouldn't happen — the create dialog
+/// validates CIDR syntax before an entry is added).
+fn build_network_policy(rules: &[NetworkRule]) -> NetworkPolicy {
+    let mut builder = NetworkPolicy::builder().default_allow();
+    for rule in rules {
+        let cidr = rule.cidr.clone();
+        let direction = rule.direction;
+        let action = rule.action;
+        builder = builder.rule(move |r| {
+            let r = match direction {
+                NetRuleDirection::Egress => r.egress(),
+                NetRuleDirection::Ingress => r.ingress(),
+            };
+            let dest = match action {
+                NetRuleAction::Allow => r.allow(),
+                NetRuleAction::Deny => r.deny(),
+            };
+            dest.cidr(cidr)
+        });
+    }
+    builder
+        .build()
+        .unwrap_or_else(|_| NetworkPolicy::allow_all())
+}
+
 /// Create and immediately detach a new sandbox using the given configuration.
 pub async fn create_sandbox(cfg: &CreateConfig) -> Result<()> {
     let mut builder = Sandbox::builder(&cfg.name)
@@ -178,6 +255,8 @@ pub async fn create_sandbox(cfg: &CreateConfig) -> Result<()> {
     }
     if cfg.disable_network {
         builder = builder.disable_network();
+    } else if !cfg.network_rules.is_empty() {
+        builder = builder.network(|n| n.policy(build_network_policy(&cfg.network_rules)));
     }
 
     let sb = builder.create().await?;
@@ -454,5 +533,46 @@ mod tests {
                 }
             }
         }
+    }
+
+    // ── NetworkRule / build_network_policy ──────────────────────────────────
+
+    #[test]
+    fn test_net_rule_action_label() {
+        assert_eq!(NetRuleAction::Allow.label(), "ALLOW");
+        assert_eq!(NetRuleAction::Deny.label(), "DENY");
+    }
+
+    #[test]
+    fn test_net_rule_direction_label() {
+        assert_eq!(NetRuleDirection::Egress.label(), "EGRESS");
+        assert_eq!(NetRuleDirection::Ingress.label(), "INGRESS");
+    }
+
+    #[test]
+    fn test_build_network_policy_empty_is_allow_all() {
+        let policy = build_network_policy(&[]);
+        let allow_all = NetworkPolicy::allow_all();
+        assert_eq!(policy.default_egress, allow_all.default_egress);
+        assert_eq!(policy.default_ingress, allow_all.default_ingress);
+        assert!(policy.rules.is_empty());
+    }
+
+    #[test]
+    fn test_build_network_policy_with_rules() {
+        let rules = vec![
+            NetworkRule {
+                cidr: "10.0.0.0/8".into(),
+                action: NetRuleAction::Deny,
+                direction: NetRuleDirection::Egress,
+            },
+            NetworkRule {
+                cidr: "192.168.0.0/16".into(),
+                action: NetRuleAction::Allow,
+                direction: NetRuleDirection::Ingress,
+            },
+        ];
+        let policy = build_network_policy(&rules);
+        assert_eq!(policy.rules.len(), 2);
     }
 }

@@ -73,6 +73,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             );
         }
         DialogTab::Advanced => {
+            let rules_summary = format_network_rules_summary(&dlg.network_rules);
             render_field(f, "Hostname", &dlg.hostname, dlg.field == 0, chunks[2]);
             render_field(f, "User    ", &dlg.user, dlg.field == 1, chunks[3]);
             render_field(f, "Shell   ", &dlg.shell, dlg.field == 2, chunks[4]);
@@ -84,6 +85,14 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 dlg.disable_network,
                 dlg.field == 5,
                 chunks[7],
+            );
+            render_managed_field_with_hint(
+                f,
+                "Net Rules",
+                &rules_summary,
+                "manage",
+                dlg.field == 6,
+                chunks[8],
             );
         }
     }
@@ -103,6 +112,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             }
             (DialogTab::Basic, 6) => "Tab/↑↓ navigate   ◄► tab   Enter browse   Esc cancel",
             (DialogTab::Advanced, 5) => "Tab/↑↓ navigate   ◄► tab   Space toggle   Esc cancel",
+            (DialogTab::Advanced, 6) => "Tab/↑↓ navigate   ◄► tab   Enter manage   Esc cancel",
             _ => "Tab/↑↓ navigate   ◄► tab   Esc cancel",
         }
     };
@@ -126,6 +136,9 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     }
     if dlg.env_vars_dialog.visible {
         render_env_vars_dialog(f, app, area);
+    }
+    if dlg.network_rules_dialog.visible {
+        render_network_rules_dialog(f, app, area);
     }
 }
 
@@ -310,6 +323,19 @@ fn format_env_vars_summary(vars: &[(String, String)]) -> String {
     } else {
         vars.iter()
             .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// Format a list of network policy rules as a compact summary string.
+fn format_network_rules_summary(rules: &[crate::sandbox::NetworkRule]) -> String {
+    if rules.is_empty() {
+        "(none — allow all)".into()
+    } else {
+        rules
+            .iter()
+            .map(|r| format!("{}:{} {}", r.direction.label(), r.action.label(), r.cidr))
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -792,6 +818,162 @@ fn render_dir_picker(f: &mut Frame, app: &App, area: Rect) {
         Paragraph::new(Span::styled(hint, Style::default().fg(Color::DarkGray))),
         chunks[3],
     );
+}
+
+/// Render the network policy rules management sub-dialog.
+///
+/// Network policy is applied only when the sandbox is created (the SDK has
+/// no API for changing it on an existing sandbox), so this dialog is only
+/// reachable from the create-sandbox dialog's Advanced tab.
+fn render_network_rules_dialog(f: &mut Frame, app: &App, area: Rect) {
+    let dialog = &app.create_dialog.network_rules_dialog;
+    if !dialog.visible {
+        return;
+    }
+
+    match dialog.mode {
+        SubDialogMode::List => {
+            let visible_rows = dialog.entries.len().clamp(3, 8) as u16;
+            let height = visible_rows + 4;
+            let popup = centred_rect(65, height, area);
+            f.render_widget(Clear, popup);
+
+            let block = Block::default()
+                .title(Span::styled(
+                    " Manage Network Rules ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ))
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Yellow));
+
+            let inner = block.inner(popup);
+            f.render_widget(block, popup);
+
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Fill(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                ])
+                .split(inner);
+
+            if dialog.entries.is_empty() {
+                f.render_widget(
+                    Paragraph::new(Span::styled(
+                        "  (no rules — default allow-all policy)",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                    chunks[0],
+                );
+            } else {
+                for (i, rule) in dialog.entries.iter().enumerate() {
+                    if i as u16 >= chunks[0].height {
+                        break;
+                    }
+                    let is_sel = i == dialog.selected;
+                    let style = if is_sel {
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    let entry = format!(
+                        "{} {} {}",
+                        rule.direction.label(),
+                        rule.action.label(),
+                        rule.cidr
+                    );
+                    let row = Rect::new(chunks[0].x, chunks[0].y + i as u16, chunks[0].width, 1);
+                    f.render_widget(
+                        Paragraph::new(Span::styled(format!("  {entry}"), style)),
+                        row,
+                    );
+                }
+            }
+
+            if let Some(ref err) = dialog.error {
+                f.render_widget(
+                    Paragraph::new(Span::styled(
+                        format!("  ✗ {err}"),
+                        Style::default().fg(Color::Red),
+                    )),
+                    chunks[1],
+                );
+            }
+
+            f.render_widget(
+                Paragraph::new(Span::styled(
+                    "  ↑↓ select   a add   d delete   Esc close",
+                    Style::default().fg(Color::DarkGray),
+                )),
+                chunks[2],
+            );
+        }
+        SubDialogMode::Add => {
+            // border(2) + spacer(1) + cidr field(3) + action/direction line(1) + hint(1) = 8
+            let popup = centred_rect(65, 8, area);
+            f.render_widget(Clear, popup);
+
+            let block = Block::default()
+                .title(Span::styled(
+                    " Add Network Rule ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ))
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Yellow));
+
+            let inner = block.inner(popup);
+            f.render_widget(block, popup);
+
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3), // cidr
+                    Constraint::Length(1), // action/direction summary
+                    Constraint::Length(1), // hint/error
+                ])
+                .split(inner);
+
+            render_field(f, "CIDR ", &dialog.cidr_input, true, chunks[0]);
+
+            let summary = format!(
+                "Direction: {} (e/i)   Action: {} (space)",
+                dialog.direction.label(),
+                dialog.action.label()
+            );
+            f.render_widget(
+                Paragraph::new(Span::styled(summary, Style::default().fg(Color::Yellow))),
+                chunks[1],
+            );
+
+            if let Some(ref err) = dialog.error {
+                f.render_widget(
+                    Paragraph::new(Span::styled(
+                        format!(" ✗ {err}"),
+                        Style::default().fg(Color::Red),
+                    )),
+                    chunks[2],
+                );
+            } else {
+                f.render_widget(
+                    Paragraph::new(Span::styled(
+                        " Type CIDR   Enter add   Esc cancel",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                    chunks[2],
+                );
+            }
+        }
+    }
 }
 
 /// Compute a centred rect with the given percentage width and fixed height,

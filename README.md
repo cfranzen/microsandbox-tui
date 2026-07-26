@@ -22,7 +22,10 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
   [SandboxConfig](https://docs.microsandbox.dev/sdk/rust/sandbox#sandboxconfig) options:
   - **Basic tab**: Name, Image, CPUs, Memory, Port mappings, Environment variables,
     Working directory (with interactive directory picker)
-  - **Advanced tab**: Hostname, User, Shell, Max CPUs, Max Memory, Disable network toggle
+  - **Advanced tab**: Hostname, User, Shell, Max CPUs, Max Memory, Disable network toggle,
+    Network policy rules (add/remove CIDR-based allow/deny rules for egress/ingress
+    traffic — applied only when the sandbox is created; the SDK does not support
+    changing network policy on an already-running sandbox)
 - **Auto-refresh** — sandbox list and detail data refresh automatically every 3 seconds
 
 ## Keyboard Shortcuts
@@ -55,8 +58,24 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 | `◄` / `►` | Switch between Basic and Advanced tabs |
 | `Space` | Toggle boolean fields (e.g. Disable Network) |
 | `Ctrl-F` | Open directory picker (Workdir field) |
-| `Enter` | Create sandbox |
+| `Enter` | Create sandbox (or open the focused field's manage dialog: Ports, Env Vars, Net Rules) |
 | `Esc` | Close dialog |
+
+### Network Rules dialog
+
+Reached from the Advanced tab's "Net Rules" field. Lets you build a CIDR-based network
+policy applied at sandbox-creation time (existing sandboxes cannot have their network
+policy changed post-creation — this is a current limitation of the microsandbox SDK).
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Select a rule |
+| `a` | Add a new rule |
+| `d` / `Delete` | Delete the selected rule |
+| `e` / `i` | Choose Egress / Ingress direction (Add mode) |
+| `Space` | Toggle Allow / Deny action (Add mode) |
+| `Enter` | Confirm the CIDR and add the rule (Add mode) / close dialog (List mode) |
+| `Esc` | Cancel add / close dialog |
 
 ### Directory picker
 

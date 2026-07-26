@@ -11,7 +11,10 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
-use crate::sandbox::{FsEntry, MetricsSnapshot, SandboxInfo, SandboxStatus as Status};
+use crate::sandbox::{
+    FsEntry, MetricsSnapshot, NetRuleAction, NetRuleDirection, NetworkRule, SandboxInfo,
+    SandboxStatus as Status,
+};
 use crate::ui;
 
 //--------------------------------------------------------------------------------------------------
@@ -257,6 +260,40 @@ impl EnvVarsDialog {
     }
 }
 
+/// Sub-dialog for managing CIDR-based network policy rules.
+///
+/// Network policy can only be configured at sandbox-creation time (the SDK's
+/// `SandboxModificationBuilder` has no field for it), so this dialog is only
+/// reachable from the create-sandbox dialog's Advanced tab.
+#[derive(Debug, Clone, Default)]
+pub struct NetworkRulesDialog {
+    pub visible: bool,
+    /// Confirmed rules.
+    pub entries: Vec<NetworkRule>,
+    /// Selected entry index (List mode).
+    pub selected: usize,
+    pub mode: SubDialogMode,
+    /// CIDR input buffer (Add mode).
+    pub cidr_input: String,
+    /// Action for the rule being added.
+    pub action: NetRuleAction,
+    /// Direction for the rule being added.
+    pub direction: NetRuleDirection,
+    pub error: Option<String>,
+}
+
+impl NetworkRulesDialog {
+    pub fn open(entries: Vec<NetworkRule>) -> Self {
+        let selected = entries.len().saturating_sub(1);
+        Self {
+            visible: true,
+            entries,
+            selected,
+            ..Default::default()
+        }
+    }
+}
+
 /// State of the "create new sandbox" modal dialog.
 #[derive(Debug, Clone, Default)]
 pub struct CreateDialog {
@@ -287,6 +324,10 @@ pub struct CreateDialog {
     pub ports_dialog: PortsDialog,
     /// Sub-dialog for managing environment variables.
     pub env_vars_dialog: EnvVarsDialog,
+    /// CIDR-based network policy rules, applied at creation time only.
+    pub network_rules: Vec<NetworkRule>,
+    /// Sub-dialog for managing network policy rules.
+    pub network_rules_dialog: NetworkRulesDialog,
 }
 
 impl CreateDialog {
@@ -304,7 +345,7 @@ impl CreateDialog {
     pub fn form_field_count(&self) -> usize {
         match self.tab {
             DialogTab::Basic => 7,    // name image cpus memory ports env_vars workdir
-            DialogTab::Advanced => 6, // hostname user shell max_cpus max_memory no_net
+            DialogTab::Advanced => 7, // hostname user shell max_cpus max_memory no_net net_rules
         }
     }
 
@@ -358,6 +399,7 @@ impl CreateDialog {
                 3 => Some(&mut self.max_cpus),
                 4 => Some(&mut self.max_memory),
                 5 => None, // disable_network toggle
+                6 => None, // network rules — managed via sub-dialog
                 _ => None,
             },
         }
@@ -830,6 +872,8 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
             handle_ports_dialog_key(app, key.code, key.modifiers);
         } else if app.create_dialog.env_vars_dialog.visible {
             handle_env_vars_dialog_key(app, key.code, key.modifiers);
+        } else if app.create_dialog.network_rules_dialog.visible {
+            handle_network_rules_dialog_key(app, key.code, key.modifiers);
         } else {
             handle_dialog_key(app, key.code, key.modifiers);
         }
@@ -954,6 +998,9 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                 let initial = app.create_dialog.workdir.trim().to_owned();
                 let start = if initial.is_empty() { "/" } else { &initial };
                 app.create_dialog.dir_picker = DirPicker::open(start);
+            } else if dlg.tab == DialogTab::Advanced && dlg.field == 6 {
+                let entries = app.create_dialog.network_rules.clone();
+                app.create_dialog.network_rules_dialog = NetworkRulesDialog::open(entries);
             }
             // Enter on plain text fields moves to next field.
             else {
@@ -1276,6 +1323,118 @@ fn handle_env_vars_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers)
     }
 }
 
+/// Parse and lightly validate a CIDR string (`a.b.c.d/prefix` shape check).
+/// Full semantic validation happens in the SDK's policy builder; this just
+/// catches obviously malformed input before it's added to the rule list.
+fn validate_cidr(input: &str) -> Result<(), &'static str> {
+    let (addr, prefix) = input.split_once('/').ok_or("CIDR must be `addr/prefix`")?;
+    if addr.is_empty() {
+        return Err("CIDR address cannot be empty");
+    }
+    let prefix_len: u8 = prefix.parse().map_err(|_| "CIDR prefix must be a number")?;
+    if addr.contains(':') {
+        if prefix_len > 128 {
+            return Err("IPv6 prefix must be 0–128");
+        }
+    } else {
+        if !addr.split('.').all(|o| o.parse::<u8>().is_ok()) || addr.split('.').count() != 4 {
+            return Err("Invalid IPv4 address");
+        }
+        if prefix_len > 32 {
+            return Err("IPv4 prefix must be 0–32");
+        }
+    }
+    Ok(())
+}
+
+fn handle_network_rules_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+    match app.create_dialog.network_rules_dialog.mode {
+        SubDialogMode::List => match code {
+            KeyCode::Esc | KeyCode::Enter => {
+                // Sync confirmed entries back to the parent field and close.
+                let entries = app.create_dialog.network_rules_dialog.entries.clone();
+                app.create_dialog.network_rules = entries;
+                app.create_dialog.network_rules_dialog.visible = false;
+            }
+            KeyCode::Up => {
+                if app.create_dialog.network_rules_dialog.selected > 0 {
+                    app.create_dialog.network_rules_dialog.selected -= 1;
+                }
+            }
+            KeyCode::Down => {
+                let len = app.create_dialog.network_rules_dialog.entries.len();
+                if len > 0 && app.create_dialog.network_rules_dialog.selected + 1 < len {
+                    app.create_dialog.network_rules_dialog.selected += 1;
+                }
+            }
+            KeyCode::Char('a') | KeyCode::Char('A') => {
+                let dialog = &mut app.create_dialog.network_rules_dialog;
+                dialog.mode = SubDialogMode::Add;
+                dialog.cidr_input.clear();
+                dialog.action = NetRuleAction::Allow;
+                dialog.direction = NetRuleDirection::Egress;
+                dialog.error = None;
+            }
+            KeyCode::Char('d') | KeyCode::Delete => {
+                let dialog = &mut app.create_dialog.network_rules_dialog;
+                if !dialog.entries.is_empty() {
+                    dialog.entries.remove(dialog.selected);
+                    if dialog.selected >= dialog.entries.len() && dialog.selected > 0 {
+                        dialog.selected -= 1;
+                    }
+                    dialog.error = None;
+                }
+            }
+            _ => {}
+        },
+        SubDialogMode::Add => match code {
+            KeyCode::Esc => {
+                app.create_dialog.network_rules_dialog.mode = SubDialogMode::List;
+                app.create_dialog.network_rules_dialog.error = None;
+            }
+            KeyCode::Char('e') | KeyCode::Char('E') => {
+                app.create_dialog.network_rules_dialog.direction = NetRuleDirection::Egress;
+            }
+            KeyCode::Char('i') | KeyCode::Char('I') => {
+                app.create_dialog.network_rules_dialog.direction = NetRuleDirection::Ingress;
+            }
+            KeyCode::Char(' ') => {
+                let dialog = &mut app.create_dialog.network_rules_dialog;
+                dialog.action = match dialog.action {
+                    NetRuleAction::Allow => NetRuleAction::Deny,
+                    NetRuleAction::Deny => NetRuleAction::Allow,
+                };
+            }
+            KeyCode::Backspace => {
+                app.create_dialog.network_rules_dialog.cidr_input.pop();
+                app.create_dialog.network_rules_dialog.error = None;
+            }
+            KeyCode::Enter => {
+                let dialog = &mut app.create_dialog.network_rules_dialog;
+                let cidr = dialog.cidr_input.trim().to_owned();
+                match validate_cidr(&cidr) {
+                    Ok(()) => {
+                        dialog.entries.push(NetworkRule {
+                            cidr,
+                            action: dialog.action,
+                            direction: dialog.direction,
+                        });
+                        dialog.selected = dialog.entries.len().saturating_sub(1);
+                        dialog.mode = SubDialogMode::List;
+                        dialog.error = None;
+                    }
+                    Err(e) => dialog.error = Some(e.to_string()),
+                }
+            }
+            KeyCode::Char(c) => {
+                app.create_dialog.network_rules_dialog.cidr_input.push(c);
+                app.create_dialog.network_rules_dialog.error = None;
+            }
+            _ => {}
+        },
+    }
+}
+
 fn submit_create_dialog(app: &mut App) {
     let dlg = &app.create_dialog;
 
@@ -1367,6 +1526,7 @@ fn submit_create_dialog(app: &mut App) {
     };
 
     let disable_network = dlg.disable_network;
+    let network_rules = dlg.network_rules.clone();
 
     app.create_dialog = Default::default();
 
@@ -1386,6 +1546,7 @@ fn submit_create_dialog(app: &mut App) {
             max_cpus,
             max_memory_mib: max_memory,
             disable_network,
+            network_rules,
         };
         let result = crate::sandbox::create_sandbox(&cfg).await;
         let (msg, is_err) = match result {
@@ -2308,6 +2469,75 @@ mod tests {
         handle_event(&mut app, key_press(KeyCode::Char('x')));
         assert!(!app.create_dialog.disable_network);
         assert!(app.create_dialog.error.is_none());
+    }
+
+    #[test]
+    fn test_dialog_network_rules_sub_dialog_add_entry() {
+        let mut app = make_app();
+        app.create_dialog = CreateDialog::open();
+        app.create_dialog.switch_tab(DialogTab::Advanced);
+        app.create_dialog.field = 6;
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        assert!(app.create_dialog.network_rules_dialog.visible);
+        handle_event(&mut app, key_press(KeyCode::Char('a')));
+        handle_event(&mut app, key_press(KeyCode::Char('i')));
+        handle_event(&mut app, key_press(KeyCode::Char(' ')));
+        for ch in "10.0.0.0/8".chars() {
+            handle_event(&mut app, key_press(KeyCode::Char(ch)));
+        }
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        handle_event(&mut app, key_press(KeyCode::Esc));
+        assert_eq!(
+            app.create_dialog.network_rules,
+            vec![NetworkRule {
+                cidr: "10.0.0.0/8".into(),
+                action: NetRuleAction::Deny,
+                direction: NetRuleDirection::Ingress,
+            }]
+        );
+    }
+
+    #[test]
+    fn test_dialog_network_rules_invalid_cidr_shows_error() {
+        let mut app = make_app();
+        app.create_dialog = CreateDialog::open();
+        app.create_dialog.switch_tab(DialogTab::Advanced);
+        app.create_dialog.field = 6;
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        handle_event(&mut app, key_press(KeyCode::Char('a')));
+        for ch in "not-a-cidr".chars() {
+            handle_event(&mut app, key_press(KeyCode::Char(ch)));
+        }
+        handle_event(&mut app, key_press(KeyCode::Enter));
+        assert!(app.create_dialog.network_rules_dialog.error.is_some());
+        assert!(app.create_dialog.network_rules_dialog.entries.is_empty());
+    }
+
+    #[test]
+    fn test_dialog_network_rules_delete_entry() {
+        let mut app = make_app();
+        app.create_dialog = CreateDialog::open();
+        app.create_dialog.network_rules_dialog = NetworkRulesDialog::open(vec![NetworkRule {
+            cidr: "1.2.3.0/24".into(),
+            action: NetRuleAction::Allow,
+            direction: NetRuleDirection::Egress,
+        }]);
+        handle_event(&mut app, key_press(KeyCode::Char('d')));
+        assert!(app.create_dialog.network_rules_dialog.entries.is_empty());
+    }
+
+    #[test]
+    fn test_validate_cidr_accepts_valid_ipv4() {
+        assert!(validate_cidr("10.0.0.0/8").is_ok());
+        assert!(validate_cidr("192.168.1.1/32").is_ok());
+    }
+
+    #[test]
+    fn test_validate_cidr_rejects_malformed() {
+        assert!(validate_cidr("not-a-cidr").is_err());
+        assert!(validate_cidr("10.0.0.0/99").is_err());
+        assert!(validate_cidr("999.0.0.0/8").is_err());
+        assert!(validate_cidr("10.0.0.0").is_err());
     }
 
     #[tokio::test]

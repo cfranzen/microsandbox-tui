@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Metrics history sparklines: the Metrics tab keeps a rolling history (last
   60 samples) of CPU % and memory usage per sandbox and renders it as a
   `Sparkline` below each gauge.
+- Network policy editor: the create-sandbox dialog's Advanced tab gained a
+  "Net Rules" field that opens a sub-dialog for adding/removing CIDR-based
+  egress/ingress allow/deny rules, applied via the SDK's
+  `NetworkPolicy`/`NetworkPolicyBuilder` when the sandbox is created. Network
+  policy remains fixed for the lifetime of the sandbox — the SDK has no API
+  for changing it post-creation, so this is documented as a creation-time-only
+  feature in the UI and README.
 
 ## [0.1.0] - 2026-07-25
 

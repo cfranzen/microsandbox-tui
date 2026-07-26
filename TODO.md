@@ -151,7 +151,7 @@ A Rust TUI application for managing MicroSandboxes, built with [ratatui](https:/
 
 - [x] Live streaming logs (continuous tail, not one-shot read)
 - [x] Metrics history sparkline / time series chart
-- [ ] Network policy editor (add/remove CIDR rules)
+- [x] Network policy editor (add/remove CIDR rules)
 - [ ] Volume/mount management
 - [ ] Multiple sandbox selection for bulk operations
 - [ ] Search/filter sandboxes by name or status
