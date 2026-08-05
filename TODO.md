@@ -20,7 +20,7 @@ A Rust TUI application for managing MicroSandboxes, built with [ratatui](https:/
 |------|--------|-------------|
 | `src/main.rs` | ✅ done | Entry point: terminal setup, panic hook, run loop, cleanup |
 | `src/app.rs` | ✅ done | App state, event loop, input handling, background message passing |
-| `src/sandbox/mod.rs` | ✅ done | Async wrappers around the microsandbox SDK (list, start, stop, kill, remove, create, logs, metrics, filesystem) |
+| `src/sandbox/mod.rs` | ✅ done | Async wrappers around the microsandbox SDK (list, start, stop, terminate, remove, create, logs, metrics, filesystem) |
 
 ### UI Modules
 
@@ -54,7 +54,7 @@ A Rust TUI application for managing MicroSandboxes, built with [ratatui](https:/
 
 - [x] **Start** stopped sandbox (`s` key) — detached mode so it survives the TUI
 - [x] **Stop** running sandbox (`S` key) — graceful shutdown
-- [x] **Kill** running sandbox (`K` key) — immediate SIGKILL
+- [x] **Terminate** running sandbox (`t` key) — immediate SIGKILL
 - [x] **Remove** stopped sandbox (`d` key) — deletes all state on disk
 - [x] **Create** new sandbox via dialog (`n` or Enter on "New Sandbox")
 - [x] Transient status notifications (4 s auto-expire)
@@ -128,7 +128,7 @@ A Rust TUI application for managing MicroSandboxes, built with [ratatui](https:/
 | `n` | Open create dialog |
 | `s` | Start selected sandbox |
 | `S` | Stop selected sandbox |
-| `K` | Kill selected sandbox |
+| `t` | Terminate selected sandbox |
 | `d` | Remove selected sandbox |
 | `r` | Force refresh |
 | `Backspace` | Navigate up one directory (filesystem tab) |
@@ -158,5 +158,5 @@ A Rust TUI application for managing MicroSandboxes, built with [ratatui](https:/
       "Navigation simplification" below)
 - [x] Navigation simplification: `←`/`→`/`Tab` switch focus between the sandbox
       list and detail panel, a single `s` key toggles start/stop based on
-      sandbox state, and destructive actions (stop, kill, remove sandbox,
+      sandbox state, and destructive actions (stop, terminate, remove sandbox,
       remove volume) show an "Are you sure?" confirmation dialog

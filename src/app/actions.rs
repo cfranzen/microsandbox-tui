@@ -11,11 +11,11 @@ use crate::sandbox::{SandboxInfo, SandboxStatus as Status};
 use super::{App, AppMessage, DetailTab};
 
 /// A destructive action awaiting user confirmation via the "Are you sure?"
-/// dialog, e.g. stopping/killing a sandbox, or removing a sandbox/volume.
+/// dialog, e.g. stopping/terminating a sandbox, or removing a sandbox/volume.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingAction {
     StopSandbox(String),
-    KillSandbox(String),
+    TerminateSandbox(String),
     RemoveSandbox(String),
     RemoveVolume(String),
 }
@@ -25,8 +25,8 @@ impl PendingAction {
     pub fn confirm_message(&self) -> String {
         match self {
             PendingAction::StopSandbox(name) => format!("Stop sandbox '{name}'?"),
-            PendingAction::KillSandbox(name) => {
-                format!("Kill sandbox '{name}'? This forcefully terminates it.")
+            PendingAction::TerminateSandbox(name) => {
+                format!("Terminate sandbox '{name}'? This forcefully stops it immediately.")
             }
             PendingAction::RemoveSandbox(name) => {
                 format!("Remove sandbox '{name}'? This deletes all of its state.")
@@ -42,7 +42,7 @@ impl PendingAction {
 pub enum SandboxAction {
     Start,
     Stop,
-    Kill,
+    Terminate,
     Remove,
 }
 
@@ -321,10 +321,10 @@ pub(crate) fn action_toggle_start_stop(app: &mut App) {
     }
 }
 
-pub(crate) fn action_kill(app: &mut App) {
+pub(crate) fn action_terminate(app: &mut App) {
     if let Some(sb) = app.selected_sandbox().cloned() {
         if sb.status == Status::Running {
-            app.confirm = Some(PendingAction::KillSandbox(sb.name));
+            app.confirm = Some(PendingAction::TerminateSandbox(sb.name));
         } else {
             app.notify("Sandbox is not running", true);
         }
@@ -363,9 +363,9 @@ pub(crate) fn execute_pending_action(app: &mut App, action: PendingAction) {
             app.run_action(SandboxAction::Stop, &name);
             app.notify(format!("Stopping '{name}'…"), false);
         }
-        PendingAction::KillSandbox(name) => {
-            app.run_action(SandboxAction::Kill, &name);
-            app.notify(format!("Killing '{name}'…"), false);
+        PendingAction::TerminateSandbox(name) => {
+            app.run_action(SandboxAction::Terminate, &name);
+            app.notify(format!("Terminating '{name}'…"), false);
         }
         PendingAction::RemoveSandbox(name) => {
             app.run_action(SandboxAction::Remove, &name);

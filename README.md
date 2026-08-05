@@ -8,9 +8,9 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 
 - **Sandbox list** — colour-coded status cards (🟢 running · 🟡 stopped · 🔴 crashed)
   with image, CPU/memory config, and age
-- **Lifecycle management** — create, start, stop, kill, and remove sandboxes from the
-  keyboard; a single `s` key toggles start/stop depending on the sandbox's current
-  state, and destructive actions (stop, kill, remove) show an "Are you sure?"
+- **Lifecycle management** — create, start, stop, terminate, and remove sandboxes from
+  the keyboard; a single `s` key toggles start/stop depending on the sandbox's current
+  state, and destructive actions (stop, terminate, remove) show an "Are you sure?"
   confirmation dialog before running
 - **Search/filter** — press `/` to search sandboxes live by substring on name, or use
   `status:running` / `status:stopped` / `status:crashed` tokens to filter by status; the
@@ -51,14 +51,13 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 | `q` / `Q` / `Ctrl-c` | Quit |
 | `↑` | Move up in list / scroll up in detail panel |
 | `↓` | Move down in list / scroll down in detail panel |
-| `Tab` | Switch focus between sandbox list and detail panel |
-| `→` | Switch focus to detail panel *(list focus)*, or go to the next detail tab *(detail focus)* |
-| `←` | Go to the previous detail tab *(detail panel focus only)* |
+| `Tab` / `→` | Switch focus to detail panel *(list focus)*, or go to the next detail tab *(detail focus)* |
+| `Shift-Tab` / `←` | Go to the previous detail tab *(detail focus)*, or return focus to the sandbox list once the leftmost tab is reached |
 | `Esc` | Return focus to sandbox list |
 | `Enter` | Open "New Sandbox" dialog (when placeholder is selected) or switch focus to detail panel |
 | `n` | Open "New Sandbox" dialog |
 | `s` | Start selected sandbox if stopped, or stop it (with confirmation) if running *(list focus only)* |
-| `K` | Kill selected sandbox (SIGKILL), with confirmation *(list focus only)* |
+| `t` | Terminate selected sandbox (SIGKILL), with confirmation *(list focus only, running sandboxes only)* |
 | `d` | Remove selected sandbox, with confirmation *(list focus only)* |
 | `v` | Open Volumes view |
 | `/` | Enter search/filter mode *(list focus only)* |
@@ -67,7 +66,7 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 
 #### Confirmation dialog
 
-Destructive actions — stopping or killing a running sandbox, removing a sandbox, and
+Destructive actions — stopping or terminating a running sandbox, removing a sandbox, and
 removing a volume — open an "Are you sure?" modal before running. Press `y` or `Enter`
 to confirm, or `n`/`Esc` to cancel. No other input is processed while the dialog is
 open.

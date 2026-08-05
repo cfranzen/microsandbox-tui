@@ -209,8 +209,8 @@ pub async fn stop_sandbox(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Kill a sandbox immediately.
-pub async fn kill_sandbox(name: &str) -> Result<()> {
+/// Terminate a sandbox immediately (forceful stop).
+pub async fn terminate_sandbox(name: &str) -> Result<()> {
     let handle = Sandbox::get(name).await?;
     handle.kill().await?;
     Ok(())

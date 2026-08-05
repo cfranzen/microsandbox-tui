@@ -415,7 +415,7 @@ impl App {
         });
     }
 
-    /// Perform a sandbox action (start/stop/kill/remove) in the background.
+    /// Perform a sandbox action (start/stop/terminate/remove) in the background.
     pub fn run_action(&self, action: SandboxAction, name: &str) {
         let tx = self.msg_tx.clone();
         let name = name.to_owned();
@@ -423,7 +423,7 @@ impl App {
             let result: Result<()> = match action {
                 SandboxAction::Start => crate::sandbox::start_sandbox(&name).await,
                 SandboxAction::Stop => crate::sandbox::stop_sandbox(&name).await,
-                SandboxAction::Kill => crate::sandbox::kill_sandbox(&name).await,
+                SandboxAction::Terminate => crate::sandbox::terminate_sandbox(&name).await,
                 SandboxAction::Remove => crate::sandbox::remove_sandbox(&name).await,
             };
             let (msg, is_err) = match result {

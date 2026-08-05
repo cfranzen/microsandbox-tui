@@ -1216,13 +1216,13 @@ async fn test_cancelling_confirm_dialog_leaves_sandbox_unchanged() {
 }
 
 #[tokio::test]
-async fn test_k_kill_opens_confirm_dialog_when_sandbox_running() {
+async fn test_t_terminate_opens_confirm_dialog_when_sandbox_running() {
     let mut app = make_app();
     app.sandboxes.push(make_sandbox("box1", Status::Running));
-    handle_event(&mut app, key_press(KeyCode::Char('K')));
+    handle_event(&mut app, key_press(KeyCode::Char('t')));
     match app.confirm {
-        Some(PendingAction::KillSandbox(ref name)) => assert_eq!(name, "box1"),
-        _ => panic!("expected a pending KillSandbox confirmation"),
+        Some(PendingAction::TerminateSandbox(ref name)) => assert_eq!(name, "box1"),
+        _ => panic!("expected a pending TerminateSandbox confirmation"),
     }
 }
 

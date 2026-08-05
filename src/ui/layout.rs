@@ -137,17 +137,6 @@ pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(" close", dim),
         ]);
     } else {
-        use crate::app::Focus;
-        if app.focus == Focus::SandboxList && !app.new_sandbox_selected() {
-            spans.extend([
-                Span::styled("s", key),
-                Span::styled(" start/stop  ", dim),
-                Span::styled("K", key),
-                Span::styled(" kill  ", dim),
-                Span::styled("d", key),
-                Span::styled(" remove  ", dim),
-            ]);
-        }
         spans.extend([
             Span::styled("n", key),
             Span::styled(" new  ", dim),
