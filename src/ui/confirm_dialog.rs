@@ -2,9 +2,8 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
@@ -15,6 +14,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let Some(action) = &app.confirm else {
         return;
     };
+    let theme = &app.theme;
 
     let message = action.confirm_message();
     let height = 6;
@@ -23,13 +23,11 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, rect);
 
     let block = Block::default()
-        .title(Span::styled(
-            " Are you sure? ",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        ))
+        .title(Span::styled(" Are you sure? ", theme.danger_bold()))
         .borders(Borders::ALL)
-        .border_type(BorderType::Thick)
-        .border_style(Style::default().fg(Color::Red));
+        .border_type(theme.border_focused_type)
+        .border_style(theme.danger())
+        .style(theme.base_style());
 
     let inner = block.inner(rect);
     f.render_widget(block, rect);
@@ -37,14 +35,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let lines = vec![
         Line::from(Span::raw(message)),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("y", Style::default().fg(Color::Yellow)),
-            Span::styled("/Enter", Style::default().fg(Color::DarkGray)),
-            Span::raw(" confirm    "),
-            Span::styled("n", Style::default().fg(Color::Yellow)),
-            Span::styled("/Esc", Style::default().fg(Color::DarkGray)),
-            Span::raw(" cancel"),
-        ]),
+        Line::from(theme.hint_spans(&[("y/Enter", "confirm"), ("n/Esc", "cancel")])),
     ];
 
     f.render_widget(

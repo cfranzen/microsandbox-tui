@@ -2,29 +2,21 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
 use crate::app::{App, DetailTab, Focus};
 
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
+    let theme = app.theme;
     let panel_focused = app.focus == Focus::Detail;
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(if panel_focused {
-            BorderType::Thick
-        } else {
-            BorderType::Rounded
-        })
-        .border_style(Style::default().fg(if panel_focused {
-            Color::Cyan
-        } else {
-            Color::DarkGray
-        }));
+        .border_type(theme.border_type(panel_focused))
+        .border_style(theme.border_style(panel_focused));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -37,9 +29,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     if let Some(sb) = app.selected_sandbox() {
         let title = Paragraph::new(Line::from(vec![Span::styled(
             sb.name.clone(),
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
+            theme.text_bold(),
         )]));
         let title_area = Rect {
             x: inner.x,
@@ -51,7 +41,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     } else if app.sandboxes.is_empty() {
         let hint = Paragraph::new(Line::from(vec![Span::styled(
             "No sandboxes found. Press n to create one.",
-            Style::default().fg(Color::DarkGray),
+            theme.muted(),
         )]));
         f.render_widget(hint, inner);
         return;
@@ -59,7 +49,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         // "New Sandbox" selected - show create hint
         let hint = Paragraph::new(Line::from(vec![Span::styled(
             "Press Enter or n to create a new sandbox.",
-            Style::default().fg(Color::DarkGray),
+            theme.muted(),
         )]));
         f.render_widget(hint, inner);
         return;
@@ -77,11 +67,12 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         .split(inner);
 
     render_tab_bar(f, app, splits[1]);
-    render_separator(f, splits[2]);
+    render_separator(f, app, splits[2]);
     render_tab_content(f, app, splits[3]);
 }
 
 fn render_tab_bar(f: &mut Frame, app: &mut App, area: Rect) {
+    let theme = app.theme;
     let mut spans: Vec<Span> = Vec::new();
     app.mouse.tab_rects.clear();
     let mut x = area.x;
@@ -89,12 +80,9 @@ fn render_tab_bar(f: &mut Frame, app: &mut App, area: Rect) {
     for &tab in DetailTab::all() {
         let active = tab == app.tab;
         let style = if active {
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD)
+            theme.selected()
         } else {
-            Style::default().fg(Color::DarkGray)
+            theme.muted()
         };
         let label = format!(" {} ", tab.title());
         let label_width = label.chars().count() as u16;
@@ -116,12 +104,9 @@ fn render_tab_bar(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_separator(f: &mut Frame, area: Rect) {
+fn render_separator(f: &mut Frame, app: &App, area: Rect) {
     let line = "─".repeat(area.width as usize);
-    f.render_widget(
-        Paragraph::new(Span::styled(line, Style::default().fg(Color::DarkGray))),
-        area,
-    );
+    f.render_widget(Paragraph::new(Span::styled(line, app.theme.muted())), area);
 }
 
 fn render_tab_content(f: &mut Frame, app: &mut App, area: Rect) {

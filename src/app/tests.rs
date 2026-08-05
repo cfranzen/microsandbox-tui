@@ -1227,6 +1227,18 @@ async fn test_t_terminate_opens_confirm_dialog_when_sandbox_running() {
 }
 
 #[tokio::test]
+async fn test_shift_t_toggles_theme() {
+    use crate::theme::ThemeMode;
+
+    let mut app = make_app();
+    assert_eq!(app.theme.mode, ThemeMode::Dark);
+    handle_event(&mut app, key_press(KeyCode::Char('T')));
+    assert_eq!(app.theme.mode, ThemeMode::Light);
+    handle_event(&mut app, key_press(KeyCode::Char('T')));
+    assert_eq!(app.theme.mode, ThemeMode::Dark);
+}
+
+#[tokio::test]
 async fn test_d_remove_opens_confirm_dialog_when_sandbox_stopped() {
     let mut app = make_app();
     app.sandboxes.push(make_sandbox("box1", Status::Stopped));

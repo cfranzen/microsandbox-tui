@@ -2,9 +2,9 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
@@ -12,6 +12,7 @@ use microsandbox::sandbox::SandboxStatus;
 
 use crate::app::{App, Focus};
 use crate::sandbox::SandboxInfo;
+use crate::theme::Theme;
 
 /// Height of a single sandbox card (lines inside the border).
 const CARD_INNER_HEIGHT: u16 = 4;
@@ -22,6 +23,7 @@ const NEW_CARD_HEIGHT: u16 = 3;
 
 /// Render the sandbox list panel.
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
+    let theme = app.theme;
     // Outer panel block
     let panel_focused = app.focus == Focus::SandboxList;
     let title = if app.search_active {
@@ -32,23 +34,10 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         " Sandboxes ".to_string()
     };
     let panel_block = Block::default()
-        .title(Span::styled(
-            title,
-            Style::default()
-                .fg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        ))
+        .title(Span::styled(title, theme.title_accent()))
         .borders(Borders::ALL)
-        .border_type(if panel_focused {
-            BorderType::Thick
-        } else {
-            BorderType::Rounded
-        })
-        .border_style(Style::default().fg(if panel_focused {
-            Color::Cyan
-        } else {
-            Color::DarkGray
-        }));
+        .border_type(theme.border_type(panel_focused))
+        .border_style(theme.border_style(panel_focused));
 
     let inner = panel_block.inner(area);
     f.render_widget(panel_block, area);
@@ -65,10 +54,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     app.mouse.card_rects.clear();
 
     if total_items == 0 {
-        let msg = Line::from(Span::styled(
-            "No sandboxes match the filter",
-            Style::default().fg(Color::DarkGray),
-        ));
+        let msg = Line::from(Span::styled("No sandboxes match the filter", theme.muted()));
         f.render_widget(Paragraph::new(msg), inner);
         return;
     }
@@ -106,6 +92,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
             app.mouse.card_rects.push((card_area, Some(abs_idx)));
             render_sandbox_card(
                 f,
+                &theme,
                 &app.sandboxes[abs_idx],
                 selected,
                 panel_focused,
@@ -124,7 +111,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
                 height: NEW_CARD_HEIGHT,
             };
             app.mouse.card_rects.push((card_area, None));
-            render_new_sandbox_card(f, selected, panel_focused, card_area);
+            render_new_sandbox_card(f, &theme, selected, panel_focused, card_area);
         }
     }
 }
@@ -132,32 +119,21 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 /// Render a single sandbox card.
 fn render_sandbox_card(
     f: &mut Frame,
+    theme: &Theme,
     sb: &SandboxInfo,
     selected: bool,
     panel_focused: bool,
     area: Rect,
 ) {
-    let (status_color, status_dot) = status_style(sb.status);
+    let (status_color, status_dot) = status_style(theme, sb.status);
 
     let highlight = selected && panel_focused;
-    let border_color = if highlight {
-        Color::Cyan
-    } else {
-        Color::DarkGray
-    };
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(if highlight {
-            BorderType::Thick
-        } else {
-            BorderType::Rounded
-        })
-        .border_style(Style::default().fg(border_color))
-        .title(Span::styled(
-            " Sandbox ",
-            Style::default().fg(Color::Magenta),
-        ))
+        .border_type(theme.border_type(highlight))
+        .border_style(theme.border_style(highlight))
+        .title(Span::styled(" Sandbox ", theme.title_accent()))
         .title_alignment(ratatui::layout::Alignment::Right);
 
     let inner = block.inner(area);
@@ -168,21 +144,20 @@ fn render_sandbox_card(
     }
 
     // Line 1: status dot + name (+ selected checkmark)
+    let name_style = if selected {
+        theme.text_bold()
+    } else {
+        theme.secondary()
+    };
     let name_line = Line::from(vec![
         Span::styled(status_dot, Style::default().fg(status_color)),
         Span::raw(" "),
         Span::styled(
             truncate(&sb.name, inner.width.saturating_sub(4) as usize),
-            Style::default()
-                .fg(if selected { Color::White } else { Color::Gray })
-                .add_modifier(if selected {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                }),
+            name_style,
         ),
         if selected {
-            Span::styled(" ✓", Style::default().fg(Color::Green))
+            Span::styled(" ✓", theme.success())
         } else {
             Span::raw("")
         },
@@ -194,7 +169,7 @@ fn render_sandbox_card(
             "  {}",
             truncate(&sb.image, inner.width.saturating_sub(3) as usize)
         ),
-        Style::default().fg(Color::DarkGray),
+        theme.muted(),
     )]);
 
     // Line 3: cpu · memory · age
@@ -213,38 +188,17 @@ fn render_sandbox_card(
             sb.memory_mib,
             truncate(&age, 10)
         ),
-        Style::default().fg(Color::DarkGray),
+        theme.muted(),
     )]);
 
     // Line 4: action hints
     let action_line = if selected && panel_focused {
-        let key = Style::default().fg(Color::Yellow);
-        let dim = Style::default().fg(Color::DarkGray);
         match sb.status {
-            SandboxStatus::Running => Line::from(vec![
-                Span::raw("  "),
-                Span::styled("s", key),
-                Span::styled("top", dim),
-                Span::raw("   "),
-                Span::styled("t", key),
-                Span::styled("erm", dim),
-                Span::raw("   "),
-                Span::styled("d", key),
-                Span::styled("el", dim),
-            ]),
-            SandboxStatus::Stopped => Line::from(vec![
-                Span::raw("  "),
-                Span::styled("s", key),
-                Span::styled("tart", dim),
-                Span::raw("   "),
-                Span::styled("d", key),
-                Span::styled("el", dim),
-            ]),
-            _ => Line::from(vec![
-                Span::raw("  "),
-                Span::styled("d", key),
-                Span::styled("el", dim),
-            ]),
+            SandboxStatus::Running => {
+                Line::from(theme.hint_spans(&[("s", "top"), ("t", "erm"), ("d", "el")]))
+            }
+            SandboxStatus::Stopped => Line::from(theme.hint_spans(&[("s", "tart"), ("d", "el")])),
+            _ => Line::from(theme.hint_spans(&[("d", "el")])),
         }
     } else {
         Line::raw("")
@@ -267,21 +221,19 @@ fn render_sandbox_card(
 }
 
 /// Render the "New Sandbox" placeholder card.
-fn render_new_sandbox_card(f: &mut Frame, selected: bool, panel_focused: bool, area: Rect) {
+fn render_new_sandbox_card(
+    f: &mut Frame,
+    theme: &Theme,
+    selected: bool,
+    panel_focused: bool,
+    area: Rect,
+) {
     let highlight = selected && panel_focused;
-    let style = if highlight {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
+    let style = theme.border_style(highlight);
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(if highlight {
-            BorderType::Thick
-        } else {
-            BorderType::Rounded
-        })
+        .border_type(theme.border_type(highlight))
         .border_style(style);
 
     let inner = block.inner(area);
@@ -301,13 +253,14 @@ fn render_new_sandbox_card(f: &mut Frame, selected: bool, panel_focused: bool, a
 // Helpers
 //--------------------------------------------------------------------------------------------------
 
-fn status_style(status: SandboxStatus) -> (Color, &'static str) {
-    match status {
-        SandboxStatus::Running => (Color::Green, "●"),
-        SandboxStatus::Stopped => (Color::Yellow, "■"),
-        SandboxStatus::Crashed => (Color::Red, "✗"),
-        _ => (Color::DarkGray, "○"),
-    }
+fn status_style(theme: &Theme, status: SandboxStatus) -> (ratatui::style::Color, &'static str) {
+    let glyph = match status {
+        SandboxStatus::Running => "●",
+        SandboxStatus::Stopped => "■",
+        SandboxStatus::Crashed => "✗",
+        _ => "○",
+    };
+    (theme.status_color(status), glyph)
 }
 
 fn truncate(s: &str, max: usize) -> String {

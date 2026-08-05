@@ -41,6 +41,7 @@ use tokio::sync::mpsc;
 
 use crate::config::AppConfig;
 use crate::sandbox::{FsEntry, MetricsSnapshot, SandboxInfo, SandboxStatus as Status};
+use crate::theme::Theme;
 use crate::ui;
 
 use actions::sandbox_matches_filter;
@@ -165,6 +166,10 @@ pub struct App {
     pub config: AppConfig,
     /// Screen regions from the most recent render, for mouse hit-testing.
     pub mouse: MouseRegions,
+    /// Active color/style palette. Every view reads colors and border
+    /// styles from this instead of hardcoding them, so toggling it
+    /// re-skins the whole app.
+    pub theme: Theme,
 }
 
 //----------------------------------------------------------------------
@@ -198,12 +203,18 @@ impl App {
             log_stream_name: None,
             config: AppConfig::load(),
             mouse: MouseRegions::default(),
+            theme: Theme::default(),
         }
     }
 
     /// Return the currently selected sandbox, if any.
     pub fn selected_sandbox(&self) -> Option<&SandboxInfo> {
         self.sandboxes.get(self.selected)
+    }
+
+    /// Switch between the dark and bright palettes.
+    pub fn toggle_theme(&mut self) {
+        self.theme = Theme::for_mode(self.theme.mode.toggled());
     }
 
     /// Push a notification that disappears after a few seconds.

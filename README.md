@@ -62,6 +62,7 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 | `v` | Open Volumes view |
 | `/` | Enter search/filter mode *(list focus only)* |
 | `r` | Force refresh |
+| `T` | Toggle between the dark and bright themes |
 | `Backspace` | Navigate up one directory *(Filesystem tab only)* |
 
 #### Confirmation dialog
@@ -221,8 +222,10 @@ shell = "/bin/bash"
 src/
 ├── main.rs             # Terminal setup/teardown, entry point
 ├── lib.rs              # Library crate root (exposes modules for integration tests)
-├── app.rs              # Application state, event loop, input handling
+├── app/                # Application state, event loop, input handling
 ├── config.rs           # TOML config file for default sandbox parameters
+├── theme.rs            # Centralized design tokens (colors, borders, style helpers);
+│                        # dark/bright palettes live here
 ├── sandbox/
 │   └── mod.rs          # Async SDK wrappers (list, create, start, stop, …)
 └── ui/
@@ -233,10 +236,18 @@ src/
     ├── logs.rs          # Logs tab
     ├── filesystem.rs    # Filesystem tab
     ├── info.rs          # Info tab (config + timestamps + live metrics)
-    └── create_dialog.rs # New sandbox modal + directory picker
+    ├── create_dialog.rs # New sandbox modal + directory picker
+    ├── confirm_dialog.rs# "Are you sure?" confirmation modal
+    └── volumes.rs       # Volumes management view
 tests/
 └── ui_rendering.rs     # Integration tests for UI rendering
 ```
+
+Every color, border style, and reusable text-style "recipe" used by the UI is
+defined once on [`Theme`](src/theme.rs) — views never hardcode a `Color` or
+`BorderType`, they call a method like `theme.accent()` or
+`theme.border_style(focused)` instead. Press `T` at runtime to switch between
+the built-in dark and bright palettes (`Theme::dark()` / `Theme::light()`).
 
 ## Contributing
 

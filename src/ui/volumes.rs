@@ -5,9 +5,8 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
     text::Span,
-    widgets::{Block, BorderType, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
@@ -29,20 +28,17 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_list(f: &mut Frame, app: &App, area: Rect) {
     let view = &app.volumes_view;
+    let theme = &app.theme;
 
     let popup = centred_rect(70, 20, area);
     f.render_widget(Clear, popup);
 
     let block = Block::default()
-        .title(Span::styled(
-            " Volumes ",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ))
+        .title(Span::styled(" Volumes ", theme.accent_bold()))
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_type(theme.border_unfocused_type)
+        .border_style(theme.accent())
+        .style(theme.base_style());
 
     let inner = block.inner(popup);
     f.render_widget(block, popup);
@@ -60,7 +56,7 @@ fn render_list(f: &mut Frame, app: &App, area: Rect) {
         f.render_widget(
             Paragraph::new(Span::styled(
                 "  (no named volumes — press 'n' to create one)",
-                Style::default().fg(Color::DarkGray),
+                theme.muted(),
             )),
             chunks[0],
         );
@@ -71,12 +67,9 @@ fn render_list(f: &mut Frame, app: &App, area: Rect) {
             }
             let is_sel = i == view.selected;
             let style = if is_sel {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
+                theme.selected()
             } else {
-                Style::default().fg(Color::White)
+                theme.text()
             };
             let kind = match vol.kind {
                 VolumeKind::Directory => "dir",
@@ -102,39 +95,36 @@ fn render_list(f: &mut Frame, app: &App, area: Rect) {
 
     if let Some(ref err) = view.error {
         f.render_widget(
-            Paragraph::new(Span::styled(
-                format!("  ✗ {err}"),
-                Style::default().fg(Color::Red),
-            )),
+            Paragraph::new(Span::styled(format!("  ✗ {err}"), theme.danger())),
             chunks[1],
         );
     }
 
     f.render_widget(
-        Paragraph::new(Span::styled(
-            "  ↑↓ select   n new   d delete   r refresh   Esc close",
-            Style::default().fg(Color::DarkGray),
-        )),
+        Paragraph::new(theme.hint_line(&[
+            ("↑↓", "select"),
+            ("n", "new"),
+            ("d", "delete"),
+            ("r", "refresh"),
+            ("Esc", "close"),
+        ])),
         chunks[2],
     );
 }
 
 fn render_add(f: &mut Frame, app: &App, area: Rect) {
     let view = &app.volumes_view;
+    let theme = &app.theme;
 
     let popup = centred_rect(60, 8, area);
     f.render_widget(Clear, popup);
 
     let block = Block::default()
-        .title(Span::styled(
-            " Create Volume ",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ))
+        .title(Span::styled(" Create Volume ", theme.accent_bold()))
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_type(theme.border_unfocused_type)
+        .border_style(theme.accent())
+        .style(theme.base_style());
 
     let inner = block.inner(popup);
     f.render_widget(block, popup);
@@ -151,7 +141,7 @@ fn render_add(f: &mut Frame, app: &App, area: Rect) {
     let name_block = Block::default()
         .title(" Name ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_style(theme.accent());
     f.render_widget(
         Paragraph::new(view.name_input.as_str()).block(name_block),
         chunks[0],
@@ -161,25 +151,23 @@ fn render_add(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(
         Paragraph::new(Span::styled(
             format!("Kind: {kind_label} (space to toggle)"),
-            Style::default().fg(Color::Yellow),
+            theme.accent(),
         )),
         chunks[1],
     );
 
     if let Some(ref err) = view.error {
         f.render_widget(
-            Paragraph::new(Span::styled(
-                format!(" ✗ {err}"),
-                Style::default().fg(Color::Red),
-            )),
+            Paragraph::new(Span::styled(format!(" ✗ {err}"), theme.danger())),
             chunks[2],
         );
     } else {
         f.render_widget(
-            Paragraph::new(Span::styled(
-                " Type name   Enter create   Esc cancel",
-                Style::default().fg(Color::DarkGray),
-            )),
+            Paragraph::new(theme.hint_line(&[
+                ("Type", "name"),
+                ("Enter", "create"),
+                ("Esc", "cancel"),
+            ])),
             chunks[2],
         );
     }

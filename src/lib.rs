@@ -6,4 +6,5 @@
 pub mod app;
 pub mod config;
 pub mod sandbox;
+pub mod theme;
 pub mod ui;

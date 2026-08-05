@@ -3,15 +3,17 @@
 use microsandbox::sandbox::LogSource;
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Color, Modifier},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
 use crate::app::App;
+use crate::theme::Theme;
 
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
+    let theme = app.theme;
     let name = match app.selected_sandbox() {
         Some(sb) => sb.name.clone(),
         None => return,
@@ -23,10 +25,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         // Trigger a fetch if we have no data yet
         app.request_logs(&name);
         f.render_widget(
-            Paragraph::new(Span::styled(
-                "Loading logs…",
-                Style::default().fg(Color::DarkGray),
-            )),
+            Paragraph::new(Span::styled("Loading logs…", theme.muted())),
             area,
         );
         return;
@@ -36,10 +35,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 
     if entries.is_empty() {
         f.render_widget(
-            Paragraph::new(Span::styled(
-                "No log entries found.",
-                Style::default().fg(Color::DarkGray),
-            )),
+            Paragraph::new(Span::styled("No log entries found.", theme.muted())),
             area,
         );
         return;
@@ -48,22 +44,22 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let lines: Vec<Line> = entries
         .iter()
         .map(|e| {
-            let (badge, badge_color) = source_badge(e.source);
+            let (badge, badge_color) = source_badge(&theme, e.source);
             let ts = e.timestamp.format("%H:%M:%S").to_string();
             let text = String::from_utf8_lossy(&e.data);
             let text = text.trim_end_matches('\n');
 
             Line::from(vec![
-                Span::styled(format!("{ts} "), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("{ts} "), theme.muted()),
                 Span::styled(
                     format!("[{badge}] "),
-                    Style::default()
+                    ratatui::style::Style::default()
                         .fg(badge_color)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     text.to_string(),
-                    Style::default().fg(message_color(e.source)),
+                    ratatui::style::Style::default().fg(message_color(&theme, e.source)),
                 ),
             ])
         })
@@ -87,31 +83,28 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let widget = Paragraph::new(lines).scroll((scroll as u16, 0)).block(
         Block::default()
             .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(Color::DarkGray))
-            .title_bottom(Span::styled(
-                count_line,
-                Style::default().fg(Color::DarkGray),
-            ))
+            .border_style(theme.muted())
+            .title_bottom(Span::styled(count_line, theme.muted()))
             .title_alignment(ratatui::layout::Alignment::Right),
     );
 
     f.render_widget(widget, area);
 }
 
-fn source_badge(source: LogSource) -> (&'static str, Color) {
+fn source_badge(theme: &Theme, source: LogSource) -> (&'static str, Color) {
     match source {
-        LogSource::Stdout => ("OUT", Color::Green),
-        LogSource::Stderr => ("ERR", Color::Red),
-        LogSource::Output => ("PTY", Color::Blue),
-        LogSource::System => ("SYS", Color::DarkGray),
+        LogSource::Stdout => ("OUT", theme.success),
+        LogSource::Stderr => ("ERR", theme.danger),
+        LogSource::Output => ("PTY", theme.info),
+        LogSource::System => ("SYS", theme.text_muted),
     }
 }
 
-fn message_color(source: LogSource) -> Color {
+fn message_color(theme: &Theme, source: LogSource) -> Color {
     match source {
-        LogSource::Stdout => Color::White,
-        LogSource::Stderr => Color::LightRed,
-        LogSource::Output => Color::White,
-        LogSource::System => Color::DarkGray,
+        LogSource::Stdout => theme.text,
+        LogSource::Stderr => theme.danger_text,
+        LogSource::Output => theme.text,
+        LogSource::System => theme.text_muted,
     }
 }

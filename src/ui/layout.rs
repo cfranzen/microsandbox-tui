@@ -2,7 +2,7 @@
 
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::Modifier,
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -36,44 +36,32 @@ pub fn split(area: Rect) -> (Rect, Rect, Rect, Rect) {
 }
 
 /// Render the top header bar.
-pub fn render_header(f: &mut Frame, area: Rect) {
-    let title = Span::styled(
-        " Microsandbox TUI ",
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::White)
-            .add_modifier(Modifier::BOLD),
-    );
-    let subtitle = Span::styled(
-        " Manage microsandbox microVMs",
-        Style::default().fg(Color::DarkGray),
-    );
-    let version = Span::styled(" v0.1.0 ", Style::default().fg(Color::DarkGray));
+pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
+    let title = Span::styled(" Microsandbox TUI ", theme.badge());
+    let subtitle = Span::styled(" Manage microsandbox microVMs", theme.muted());
+    let version = Span::styled(" v0.1.0 ", theme.muted());
 
     let line = Line::from(vec![title, subtitle]);
     let version_line = Line::from(vec![version]).alignment(Alignment::Right);
 
     // Two overlapping paragraphs: left-aligned title, right-aligned version
-    f.render_widget(
-        Paragraph::new(line).style(Style::default().bg(Color::Black)),
-        area,
-    );
+    f.render_widget(Paragraph::new(line).style(theme.base_style()), area);
 
     // Overlay the version on the right
-    f.render_widget(
-        Paragraph::new(version_line).style(Style::default().bg(Color::Black)),
-        area,
-    );
+    f.render_widget(Paragraph::new(version_line).style(theme.base_style()), area);
 }
 
 /// Render the bottom footer bar with keybind hints and optional notification.
 pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
+
     // Show notification if active, otherwise show keybind hints
     if let Some(ref n) = app.notification {
         let style = if n.is_error {
-            Style::default().fg(Color::Red).bg(Color::Black)
+            theme.danger()
         } else {
-            Style::default().fg(Color::Green).bg(Color::Black)
+            theme.success()
         };
         let prefix = if n.is_error { "✗ " } else { "✓ " };
         f.render_widget(
@@ -81,76 +69,50 @@ pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled(prefix, style.add_modifier(Modifier::BOLD)),
                 Span::styled(n.message.as_str(), style),
             ]))
-            .style(Style::default().bg(Color::Black)),
+            .style(theme.base_style()),
             area,
         );
         return;
     }
 
     // Context-sensitive hints
-    let dim = Style::default().fg(Color::DarkGray);
-    let key = Style::default()
-        .fg(Color::Yellow)
-        .add_modifier(Modifier::BOLD);
-
-    let mut spans: Vec<Span> = vec![
-        Span::styled("q", key),
-        Span::styled(" quit  ", dim),
-        Span::styled("↑↓←→/Tab", key),
-        Span::styled(" navigate  ", dim),
-    ];
+    let mut pairs: Vec<(&str, &str)> = vec![("q", "quit"), ("↑↓←→/Tab", "navigate")];
 
     if app.confirm.is_some() {
-        spans = vec![
-            Span::styled("y/Enter", key),
-            Span::styled(" confirm  ", dim),
-            Span::styled("n/Esc", key),
-            Span::styled(" cancel", dim),
-        ];
+        pairs = vec![("y/Enter", "confirm"), ("n/Esc", "cancel")];
     } else if app.search_active {
-        spans = vec![
-            Span::styled("Type", key),
-            Span::styled(" to filter  ", dim),
-            Span::styled("Enter", key),
-            Span::styled(" confirm  ", dim),
-            Span::styled("Esc", key),
-            Span::styled(" clear & exit", dim),
+        pairs = vec![
+            ("Type", "to filter"),
+            ("Enter", "confirm"),
+            ("Esc", "clear & exit"),
         ];
     } else if app.create_dialog.visible {
-        spans.extend([
-            Span::styled("Tab", key),
-            Span::styled(" next field  ", dim),
-            Span::styled("Enter", key),
-            Span::styled(" create  ", dim),
-            Span::styled("Esc", key),
-            Span::styled(" cancel", dim),
+        pairs.extend([
+            ("Tab", "next field"),
+            ("Enter", "create"),
+            ("Esc", "cancel"),
         ]);
     } else if app.volumes_view.visible {
-        spans.extend([
-            Span::styled("↑↓", key),
-            Span::styled(" select  ", dim),
-            Span::styled("n", key),
-            Span::styled(" new  ", dim),
-            Span::styled("d", key),
-            Span::styled(" delete  ", dim),
-            Span::styled("Esc", key),
-            Span::styled(" close", dim),
+        pairs.extend([
+            ("↑↓", "select"),
+            ("n", "new"),
+            ("d", "delete"),
+            ("Esc", "close"),
         ]);
     } else {
-        spans.extend([
-            Span::styled("n", key),
-            Span::styled(" new  ", dim),
-            Span::styled("/", key),
-            Span::styled(" search  ", dim),
-            Span::styled("v", key),
-            Span::styled(" volumes  ", dim),
-            Span::styled("r", key),
-            Span::styled(" refresh", dim),
+        pairs.extend([
+            ("n", "new"),
+            ("/", "search"),
+            ("v", "volumes"),
+            ("r", "refresh"),
+            ("T", "theme"),
         ]);
     }
 
+    let spans = theme.hint_spans(&pairs);
+
     f.render_widget(
-        Paragraph::new(Line::from(spans)).style(Style::default().bg(Color::Black)),
+        Paragraph::new(Line::from(spans)).style(theme.base_style()),
         area,
     );
 }

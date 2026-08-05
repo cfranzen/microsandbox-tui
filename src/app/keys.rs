@@ -157,6 +157,9 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
             app.request_refresh();
             app.notify("Refreshing…", false);
         }
+        KeyCode::Char('T') => {
+            app.toggle_theme();
+        }
 
         // Filesystem navigation
         KeyCode::Backspace if app.focus == Focus::Detail && app.tab == DetailTab::Filesystem => {

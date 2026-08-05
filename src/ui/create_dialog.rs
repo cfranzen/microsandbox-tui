@@ -2,17 +2,19 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::Modifier,
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
 use crate::app::{App, DialogTab, SubDialogMode, DRIVES_ENTRY, PICKER_VISIBLE_ROWS};
+use crate::theme::Theme;
 
 /// Render the create-sandbox dialog centred over the full terminal area.
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let dlg = &app.create_dialog;
+    let theme = &app.theme;
     if !dlg.visible {
         return;
     }
@@ -21,15 +23,11 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup);
 
     let block = Block::default()
-        .title(Span::styled(
-            " New Sandbox ",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ))
+        .title(Span::styled(" New Sandbox ", theme.accent_bold()))
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_type(theme.border_unfocused_type)
+        .border_style(theme.accent())
+        .style(theme.base_style());
 
     let inner = block.inner(popup);
     f.render_widget(block, popup);
@@ -46,7 +44,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         .constraints(constraints)
         .split(inner);
 
-    render_tab_bar(f, dlg.tab, chunks[0]);
+    render_tab_bar(f, theme, dlg.tab, chunks[0]);
 
     match dlg.tab {
         DialogTab::Basic => {
@@ -58,31 +56,75 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 dlg.workdir.clone()
             };
-            render_field(f, "Name    ", &dlg.name, dlg.field == 0, chunks[2]);
-            render_field(f, "Image   ", &dlg.image, dlg.field == 1, chunks[3]);
-            render_field(f, "CPUs    ", &dlg.cpus, dlg.field == 2, chunks[4]);
-            render_field(f, "Memory  ", &dlg.memory, dlg.field == 3, chunks[5]);
-            render_managed_field(f, "Ports   ", &ports_summary, dlg.field == 4, chunks[6]);
-            render_managed_field(f, "Env Vars", &env_summary, dlg.field == 5, chunks[7]);
+            render_field(f, theme, "Name    ", &dlg.name, dlg.field == 0, chunks[2]);
+            render_field(f, theme, "Image   ", &dlg.image, dlg.field == 1, chunks[3]);
+            render_field(f, theme, "CPUs    ", &dlg.cpus, dlg.field == 2, chunks[4]);
+            render_field(f, theme, "Memory  ", &dlg.memory, dlg.field == 3, chunks[5]);
+            render_managed_field(
+                f,
+                theme,
+                "Ports   ",
+                &ports_summary,
+                dlg.field == 4,
+                chunks[6],
+            );
+            render_managed_field(
+                f,
+                theme,
+                "Env Vars",
+                &env_summary,
+                dlg.field == 5,
+                chunks[7],
+            );
             render_managed_field_with_hint(
                 f,
+                theme,
                 "Workdir ",
                 &workdir_summary,
                 "browse",
                 dlg.field == 6,
                 chunks[8],
             );
-            render_managed_field(f, "Mounts  ", &mounts_summary, dlg.field == 7, chunks[9]);
+            render_managed_field(
+                f,
+                theme,
+                "Mounts  ",
+                &mounts_summary,
+                dlg.field == 7,
+                chunks[9],
+            );
         }
         DialogTab::Advanced => {
             let rules_summary = format_network_rules_summary(&dlg.network_rules);
-            render_field(f, "Hostname", &dlg.hostname, dlg.field == 0, chunks[2]);
-            render_field(f, "User    ", &dlg.user, dlg.field == 1, chunks[3]);
-            render_field(f, "Shell   ", &dlg.shell, dlg.field == 2, chunks[4]);
-            render_field(f, "Max CPUs", &dlg.max_cpus, dlg.field == 3, chunks[5]);
-            render_field(f, "Max Mem ", &dlg.max_memory, dlg.field == 4, chunks[6]);
+            render_field(
+                f,
+                theme,
+                "Hostname",
+                &dlg.hostname,
+                dlg.field == 0,
+                chunks[2],
+            );
+            render_field(f, theme, "User    ", &dlg.user, dlg.field == 1, chunks[3]);
+            render_field(f, theme, "Shell   ", &dlg.shell, dlg.field == 2, chunks[4]);
+            render_field(
+                f,
+                theme,
+                "Max CPUs",
+                &dlg.max_cpus,
+                dlg.field == 3,
+                chunks[5],
+            );
+            render_field(
+                f,
+                theme,
+                "Max Mem ",
+                &dlg.max_memory,
+                dlg.field == 4,
+                chunks[6],
+            );
             render_toggle(
                 f,
+                theme,
                 "No Net  ",
                 dlg.disable_network,
                 dlg.field == 5,
@@ -90,6 +132,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             );
             render_managed_field_with_hint(
                 f,
+                theme,
                 "Net Rules",
                 &rules_summary,
                 "manage",
@@ -101,33 +144,48 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
 
     // Create button — always at chunks[2 + form_field_count]
     let create_chunk = chunks[2 + form_fields];
-    render_create_button(f, dlg.is_create_focused(), create_chunk);
+    render_create_button(f, theme, dlg.is_create_focused(), create_chunk);
 
     // Hint / error — always at chunks[2 + form_field_count + 1]
     let message_chunk = chunks[2 + form_fields + 1];
-    let hint = if dlg.is_create_focused() {
-        "Enter create sandbox   Esc cancel"
+    let hint_pairs: &[(&str, &str)] = if dlg.is_create_focused() {
+        &[("Enter", "create sandbox"), ("Esc", "cancel")]
     } else {
         match (dlg.tab, dlg.field) {
-            (DialogTab::Basic, 4) | (DialogTab::Basic, 5) | (DialogTab::Basic, 7) => {
-                "Tab/↑↓ navigate   ◄► tab   Enter manage   Esc cancel"
-            }
-            (DialogTab::Basic, 6) => "Tab/↑↓ navigate   ◄► tab   Enter browse   Esc cancel",
-            (DialogTab::Advanced, 5) => "Tab/↑↓ navigate   ◄► tab   Space toggle   Esc cancel",
-            (DialogTab::Advanced, 6) => "Tab/↑↓ navigate   ◄► tab   Enter manage   Esc cancel",
-            _ => "Tab/↑↓ navigate   ◄► tab   Esc cancel",
+            (DialogTab::Basic, 4) | (DialogTab::Basic, 5) | (DialogTab::Basic, 7) => &[
+                ("Tab/↑↓", "navigate"),
+                ("◄►", "tab"),
+                ("Enter", "manage"),
+                ("Esc", "cancel"),
+            ],
+            (DialogTab::Basic, 6) => &[
+                ("Tab/↑↓", "navigate"),
+                ("◄►", "tab"),
+                ("Enter", "browse"),
+                ("Esc", "cancel"),
+            ],
+            (DialogTab::Advanced, 5) => &[
+                ("Tab/↑↓", "navigate"),
+                ("◄►", "tab"),
+                ("Space", "toggle"),
+                ("Esc", "cancel"),
+            ],
+            (DialogTab::Advanced, 6) => &[
+                ("Tab/↑↓", "navigate"),
+                ("◄►", "tab"),
+                ("Enter", "manage"),
+                ("Esc", "cancel"),
+            ],
+            _ => &[("Tab/↑↓", "navigate"), ("◄►", "tab"), ("Esc", "cancel")],
         }
     };
     if let Some(ref err) = dlg.error {
         f.render_widget(
-            Paragraph::new(Span::styled(
-                format!("  ✗ {err}"),
-                Style::default().fg(Color::Red),
-            )),
+            Paragraph::new(Span::styled(format!("  ✗ {err}"), theme.danger())),
             message_chunk,
         );
     } else {
-        f.render_widget(Paragraph::new(hint), message_chunk);
+        f.render_widget(Paragraph::new(theme.hint_line(hint_pairs)), message_chunk);
     }
 
     if dlg.dir_picker.visible {
@@ -147,19 +205,16 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-fn render_tab_bar(f: &mut Frame, tab: DialogTab, area: Rect) {
+fn render_tab_bar(f: &mut Frame, theme: &Theme, tab: DialogTab, area: Rect) {
     let basic = if tab == DialogTab::Basic {
-        Span::styled("[Basic]", Style::default().fg(Color::Black).bg(Color::Cyan))
+        Span::styled("[Basic]", theme.selected())
     } else {
-        Span::styled("[Basic]", Style::default().fg(Color::Gray))
+        Span::styled("[Basic]", theme.secondary())
     };
     let advanced = if tab == DialogTab::Advanced {
-        Span::styled(
-            "[Advanced]",
-            Style::default().fg(Color::Black).bg(Color::Cyan),
-        )
+        Span::styled("[Advanced]", theme.selected())
     } else {
-        Span::styled("[Advanced]", Style::default().fg(Color::Gray))
+        Span::styled("[Advanced]", theme.secondary())
     };
 
     f.render_widget(
@@ -168,32 +223,18 @@ fn render_tab_bar(f: &mut Frame, tab: DialogTab, area: Rect) {
     );
 }
 
-fn render_field(f: &mut Frame, label: &str, value: &str, focused: bool, area: Rect) {
-    let border_color = if focused {
-        Color::Cyan
+fn render_field(f: &mut Frame, theme: &Theme, label: &str, value: &str, focused: bool, area: Rect) {
+    let label_style = if focused {
+        theme.text_bold()
     } else {
-        Color::DarkGray
-    };
-    let label_color = if focused {
-        Color::White
-    } else {
-        Color::DarkGray
+        theme.muted().add_modifier(Modifier::BOLD)
     };
 
     let block = Block::default()
-        .title(Span::styled(
-            format!(" {label} "),
-            Style::default()
-                .fg(label_color)
-                .add_modifier(Modifier::BOLD),
-        ))
+        .title(Span::styled(format!(" {label} "), label_style))
         .borders(Borders::ALL)
-        .border_type(if focused {
-            BorderType::Thick
-        } else {
-            BorderType::Rounded
-        })
-        .border_style(Style::default().fg(border_color));
+        .border_type(theme.border_type(focused))
+        .border_style(theme.border_style(focused));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -211,41 +252,37 @@ fn render_field(f: &mut Frame, label: &str, value: &str, focused: bool, area: Re
         format!(" {value}")
     };
 
+    let value_style = if focused {
+        theme.text()
+    } else {
+        theme.secondary()
+    };
+
     f.render_widget(
-        Paragraph::new(Span::styled(
-            display,
-            Style::default().fg(if focused { Color::White } else { Color::Gray }),
-        )),
+        Paragraph::new(Span::styled(display, value_style)),
         text_area,
     );
 }
 
-fn render_toggle(f: &mut Frame, label: &str, value: bool, focused: bool, area: Rect) {
-    let border_color = if focused {
-        Color::Cyan
+fn render_toggle(
+    f: &mut Frame,
+    theme: &Theme,
+    label: &str,
+    value: bool,
+    focused: bool,
+    area: Rect,
+) {
+    let label_style = if focused {
+        theme.text_bold()
     } else {
-        Color::DarkGray
-    };
-    let label_color = if focused {
-        Color::White
-    } else {
-        Color::DarkGray
+        theme.muted().add_modifier(Modifier::BOLD)
     };
 
     let block = Block::default()
-        .title(Span::styled(
-            format!(" {label} "),
-            Style::default()
-                .fg(label_color)
-                .add_modifier(Modifier::BOLD),
-        ))
+        .title(Span::styled(format!(" {label} "), label_style))
         .borders(Borders::ALL)
-        .border_type(if focused {
-            BorderType::Thick
-        } else {
-            BorderType::Rounded
-        })
-        .border_style(Style::default().fg(border_color));
+        .border_type(theme.border_type(focused))
+        .border_style(theme.border_style(focused));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -256,42 +293,26 @@ fn render_toggle(f: &mut Frame, label: &str, value: bool, focused: bool, area: R
         inner.width,
         inner.height.min(1),
     );
-    let (text, color) = if value {
-        (" ● On", Color::Green)
+    let (text, style) = if value {
+        (" ● On", theme.success())
     } else {
-        (" ○ Off", Color::DarkGray)
+        (" ○ Off", theme.muted())
     };
 
-    f.render_widget(
-        Paragraph::new(Span::styled(text, Style::default().fg(color))),
-        text_area,
-    );
+    f.render_widget(Paragraph::new(Span::styled(text, style)), text_area);
 }
 
 /// Render the Create Sandbox button at the bottom of the form.
-fn render_create_button(f: &mut Frame, focused: bool, area: Rect) {
+fn render_create_button(f: &mut Frame, theme: &Theme, focused: bool, area: Rect) {
     // Use a multi-span Line so we can mix styles within a single row.
     // Focused:   ──────────────────── ✚ Create Sandbox ▶
     // Unfocused: ──────────────────── ✚ Create Sandbox ▶  (dimmed)
     let label = " ✚ Create Sandbox ";
 
     let (fill_style, label_style, arrow_style) = if focused {
-        (
-            Style::default().fg(Color::DarkGray),
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )
+        (theme.muted(), theme.selected(), theme.accent_bold())
     } else {
-        (
-            Style::default().fg(Color::DarkGray),
-            Style::default().fg(Color::DarkGray),
-            Style::default().fg(Color::DarkGray),
-        )
+        (theme.muted(), theme.muted(), theme.muted())
     };
 
     // Arrow glyph that bookends the label, Powerline-style.
@@ -365,43 +386,37 @@ fn format_mounts_summary(mounts: &[crate::sandbox::VolumeMountConfig]) -> String
 
 /// Render a read-only field whose value is managed via a sub-dialog or picker.
 /// `action_hint` is shown when focused, e.g. `"manage"` or `"browse"`.
-fn render_managed_field(f: &mut Frame, label: &str, summary: &str, focused: bool, area: Rect) {
-    render_managed_field_with_hint(f, label, summary, "manage", focused, area);
+fn render_managed_field(
+    f: &mut Frame,
+    theme: &Theme,
+    label: &str,
+    summary: &str,
+    focused: bool,
+    area: Rect,
+) {
+    render_managed_field_with_hint(f, theme, label, summary, "manage", focused, area);
 }
 
 fn render_managed_field_with_hint(
     f: &mut Frame,
+    theme: &Theme,
     label: &str,
     summary: &str,
     action_hint: &str,
     focused: bool,
     area: Rect,
 ) {
-    let border_color = if focused {
-        Color::Cyan
+    let label_style = if focused {
+        theme.text_bold()
     } else {
-        Color::DarkGray
-    };
-    let label_color = if focused {
-        Color::White
-    } else {
-        Color::DarkGray
+        theme.muted().add_modifier(Modifier::BOLD)
     };
 
     let block = Block::default()
-        .title(Span::styled(
-            format!(" {label} "),
-            Style::default()
-                .fg(label_color)
-                .add_modifier(Modifier::BOLD),
-        ))
+        .title(Span::styled(format!(" {label} "), label_style))
         .borders(Borders::ALL)
-        .border_type(if focused {
-            BorderType::Thick
-        } else {
-            BorderType::Rounded
-        })
-        .border_style(Style::default().fg(border_color));
+        .border_type(theme.border_type(focused))
+        .border_style(theme.border_style(focused));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -413,7 +428,7 @@ fn render_managed_field_with_hint(
         inner.height.min(1),
     );
 
-    let (text, color) = if focused {
+    let (text, style) = if focused {
         let indicator = format!("  [↵ {action_hint}]");
         let max_summary = (inner.width as usize).saturating_sub(indicator.len() + 1);
         let truncated = if summary.len() > max_summary {
@@ -421,20 +436,18 @@ fn render_managed_field_with_hint(
         } else {
             summary.to_owned()
         };
-        (format!(" {truncated}{indicator}"), Color::Cyan)
+        (format!(" {truncated}{indicator}"), theme.accent())
     } else {
-        (format!(" {summary}"), Color::Gray)
+        (format!(" {summary}"), theme.secondary())
     };
 
-    f.render_widget(
-        Paragraph::new(Span::styled(text, Style::default().fg(color))),
-        text_area,
-    );
+    f.render_widget(Paragraph::new(Span::styled(text, style)), text_area);
 }
 
 /// Render the ports management sub-dialog.
 fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
     let dialog = &app.create_dialog.ports_dialog;
+    let theme = &app.theme;
     if !dialog.visible {
         return;
     }
@@ -448,15 +461,10 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
             f.render_widget(Clear, popup);
 
             let block = Block::default()
-                .title(Span::styled(
-                    " Manage Ports ",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ))
+                .title(Span::styled(" Manage Ports ", theme.accent_bold()))
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Yellow));
+                .border_type(theme.border_unfocused_type)
+                .border_style(theme.accent());
 
             let inner = block.inner(popup);
             f.render_widget(block, popup);
@@ -472,10 +480,7 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             if dialog.entries.is_empty() {
                 f.render_widget(
-                    Paragraph::new(Span::styled(
-                        "  (no ports configured)",
-                        Style::default().fg(Color::DarkGray),
-                    )),
+                    Paragraph::new(Span::styled("  (no ports configured)", theme.muted())),
                     chunks[0],
                 );
             } else {
@@ -485,12 +490,9 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
                     }
                     let is_sel = i == dialog.selected;
                     let style = if is_sel {
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD)
+                        theme.selected()
                     } else {
-                        Style::default().fg(Color::White)
+                        theme.text()
                     };
                     let row = Rect::new(chunks[0].x, chunks[0].y + i as u16, chunks[0].width, 1);
                     f.render_widget(
@@ -502,19 +504,18 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
-                    Paragraph::new(Span::styled(
-                        format!("  ✗ {err}"),
-                        Style::default().fg(Color::Red),
-                    )),
+                    Paragraph::new(Span::styled(format!("  ✗ {err}"), theme.danger())),
                     chunks[1],
                 );
             }
 
             f.render_widget(
-                Paragraph::new(Span::styled(
-                    "  ↑↓ select   a add   d delete   Esc close",
-                    Style::default().fg(Color::DarkGray),
-                )),
+                Paragraph::new(theme.hint_line(&[
+                    ("↑↓", "select"),
+                    ("a", "add"),
+                    ("d", "delete"),
+                    ("Esc", "close"),
+                ])),
                 chunks[2],
             );
         }
@@ -524,15 +525,10 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
             f.render_widget(Clear, popup);
 
             let block = Block::default()
-                .title(Span::styled(
-                    " Add Port Mapping ",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ))
+                .title(Span::styled(" Add Port Mapping ", theme.accent_bold()))
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Yellow));
+                .border_type(theme.border_unfocused_type)
+                .border_style(theme.accent());
 
             let inner = block.inner(popup);
             f.render_widget(block, popup);
@@ -549,6 +545,7 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             render_field(
                 f,
+                theme,
                 "Host Port ",
                 &dialog.host_input,
                 dialog.add_field == 0,
@@ -556,6 +553,7 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
             );
             render_field(
                 f,
+                theme,
                 "Guest Port",
                 &dialog.guest_input,
                 dialog.add_field == 1,
@@ -564,18 +562,16 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
-                    Paragraph::new(Span::styled(
-                        format!(" ✗ {err}"),
-                        Style::default().fg(Color::Red),
-                    )),
+                    Paragraph::new(Span::styled(format!(" ✗ {err}"), theme.danger())),
                     chunks[3],
                 );
             } else {
                 f.render_widget(
-                    Paragraph::new(Span::styled(
-                        " Tab field   Enter add   Esc cancel",
-                        Style::default().fg(Color::DarkGray),
-                    )),
+                    Paragraph::new(theme.hint_line(&[
+                        ("Tab", "field"),
+                        ("Enter", "add"),
+                        ("Esc", "cancel"),
+                    ])),
                     chunks[3],
                 );
             }
@@ -586,6 +582,7 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
 /// Render the env vars management sub-dialog.
 fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
     let dialog = &app.create_dialog.env_vars_dialog;
+    let theme = &app.theme;
     if !dialog.visible {
         return;
     }
@@ -600,13 +597,11 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
             let block = Block::default()
                 .title(Span::styled(
                     " Manage Environment Variables ",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
+                    theme.accent_bold(),
                 ))
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Yellow));
+                .border_type(theme.border_unfocused_type)
+                .border_style(theme.accent());
 
             let inner = block.inner(popup);
             f.render_widget(block, popup);
@@ -624,7 +619,7 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
                 f.render_widget(
                     Paragraph::new(Span::styled(
                         "  (no environment variables configured)",
-                        Style::default().fg(Color::DarkGray),
+                        theme.muted(),
                     )),
                     chunks[0],
                 );
@@ -635,12 +630,9 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
                     }
                     let is_sel = i == dialog.selected;
                     let style = if is_sel {
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD)
+                        theme.selected()
                     } else {
-                        Style::default().fg(Color::White)
+                        theme.text()
                     };
                     // Truncate long lines to fit the popup width.
                     let max_w = chunks[0].width.saturating_sub(4) as usize;
@@ -660,19 +652,18 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
-                    Paragraph::new(Span::styled(
-                        format!("  ✗ {err}"),
-                        Style::default().fg(Color::Red),
-                    )),
+                    Paragraph::new(Span::styled(format!("  ✗ {err}"), theme.danger())),
                     chunks[1],
                 );
             }
 
             f.render_widget(
-                Paragraph::new(Span::styled(
-                    "  ↑↓ select   a add   d delete   Esc close",
-                    Style::default().fg(Color::DarkGray),
-                )),
+                Paragraph::new(theme.hint_line(&[
+                    ("↑↓", "select"),
+                    ("a", "add"),
+                    ("d", "delete"),
+                    ("Esc", "close"),
+                ])),
                 chunks[2],
             );
         }
@@ -684,13 +675,11 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
             let block = Block::default()
                 .title(Span::styled(
                     " Add Environment Variable ",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
+                    theme.accent_bold(),
                 ))
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Yellow));
+                .border_type(theme.border_unfocused_type)
+                .border_style(theme.accent());
 
             let inner = block.inner(popup);
             f.render_widget(block, popup);
@@ -707,6 +696,7 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             render_field(
                 f,
+                theme,
                 "Key  ",
                 &dialog.key_input,
                 dialog.add_field == 0,
@@ -714,6 +704,7 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
             );
             render_field(
                 f,
+                theme,
                 "Value",
                 &dialog.value_input,
                 dialog.add_field == 1,
@@ -722,18 +713,16 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
-                    Paragraph::new(Span::styled(
-                        format!(" ✗ {err}"),
-                        Style::default().fg(Color::Red),
-                    )),
+                    Paragraph::new(Span::styled(format!(" ✗ {err}"), theme.danger())),
                     chunks[3],
                 );
             } else {
                 f.render_widget(
-                    Paragraph::new(Span::styled(
-                        " Tab field   Enter add   Esc cancel",
-                        Style::default().fg(Color::DarkGray),
-                    )),
+                    Paragraph::new(theme.hint_line(&[
+                        ("Tab", "field"),
+                        ("Enter", "add"),
+                        ("Esc", "cancel"),
+                    ])),
                     chunks[3],
                 );
             }
@@ -744,6 +733,7 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
 /// Render the directory picker overlay on top of the dialog.
 fn render_dir_picker(f: &mut Frame, app: &App, area: Rect) {
     let picker = &app.create_dialog.dir_picker;
+    let theme = &app.theme;
     // Height: 1 border + 1 path + 1 separator + PICKER_VISIBLE_ROWS entries + 1 hint + 1 border
     let height = (PICKER_VISIBLE_ROWS + 4) as u16;
     let popup = centred_rect(60, height, area);
@@ -755,15 +745,10 @@ fn render_dir_picker(f: &mut Frame, app: &App, area: Rect) {
         " Select Directory "
     };
     let block = Block::default()
-        .title(Span::styled(
-            title,
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ))
+        .title(Span::styled(title, theme.accent_bold()))
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_type(theme.border_unfocused_type)
+        .border_style(theme.accent());
 
     let inner = block.inner(popup);
     f.render_widget(block, popup);
@@ -786,7 +771,7 @@ fn render_dir_picker(f: &mut Frame, app: &App, area: Rect) {
         format!(" 📂 {}", picker.path)
     };
     f.render_widget(
-        Paragraph::new(Span::styled(header, Style::default().fg(Color::Yellow))),
+        Paragraph::new(Span::styled(header, theme.accent())),
         chunks[0],
     );
 
@@ -794,7 +779,7 @@ fn render_dir_picker(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(
         Paragraph::new(Span::styled(
             "─".repeat(inner.width as usize),
-            Style::default().fg(Color::DarkGray),
+            theme.muted(),
         )),
         chunks[1],
     );
@@ -814,14 +799,11 @@ fn render_dir_picker(f: &mut Frame, app: &App, area: Rect) {
         };
         let is_selected = idx == picker.selected;
         let style = if is_selected {
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Yellow)
-                .add_modifier(Modifier::BOLD)
+            theme.selected()
         } else if entry == DRIVES_ENTRY {
-            Style::default().fg(Color::Yellow)
+            theme.accent()
         } else {
-            Style::default().fg(Color::White)
+            theme.text()
         };
         let entry_area = Rect::new(chunks[2].x, chunks[2].y + row as u16, chunks[2].width, 1);
         f.render_widget(
@@ -831,15 +813,25 @@ fn render_dir_picker(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Hint
-    let hint = if picker.showing_drives {
-        "↑↓ navigate   Enter select drive   / drives   ~ home   Esc cancel"
+    let hint_pairs: &[(&str, &str)] = if picker.showing_drives {
+        &[
+            ("↑↓", "navigate"),
+            ("Enter", "select drive"),
+            ("/", "drives"),
+            ("~", "home"),
+            ("Esc", "cancel"),
+        ]
     } else {
-        "↑↓ navigate   Enter descend   Space select   / drives   ~ home   Esc cancel"
+        &[
+            ("↑↓", "navigate"),
+            ("Enter", "descend"),
+            ("Space", "select"),
+            ("/", "drives"),
+            ("~", "home"),
+            ("Esc", "cancel"),
+        ]
     };
-    f.render_widget(
-        Paragraph::new(Span::styled(hint, Style::default().fg(Color::DarkGray))),
-        chunks[3],
-    );
+    f.render_widget(Paragraph::new(theme.hint_line(hint_pairs)), chunks[3]);
 }
 
 /// Render the network policy rules management sub-dialog.
@@ -849,6 +841,7 @@ fn render_dir_picker(f: &mut Frame, app: &App, area: Rect) {
 /// reachable from the create-sandbox dialog's Advanced tab.
 fn render_network_rules_dialog(f: &mut Frame, app: &App, area: Rect) {
     let dialog = &app.create_dialog.network_rules_dialog;
+    let theme = &app.theme;
     if !dialog.visible {
         return;
     }
@@ -861,15 +854,10 @@ fn render_network_rules_dialog(f: &mut Frame, app: &App, area: Rect) {
             f.render_widget(Clear, popup);
 
             let block = Block::default()
-                .title(Span::styled(
-                    " Manage Network Rules ",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ))
+                .title(Span::styled(" Manage Network Rules ", theme.accent_bold()))
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Yellow));
+                .border_type(theme.border_unfocused_type)
+                .border_style(theme.accent());
 
             let inner = block.inner(popup);
             f.render_widget(block, popup);
@@ -887,7 +875,7 @@ fn render_network_rules_dialog(f: &mut Frame, app: &App, area: Rect) {
                 f.render_widget(
                     Paragraph::new(Span::styled(
                         "  (no rules — default allow-all policy)",
-                        Style::default().fg(Color::DarkGray),
+                        theme.muted(),
                     )),
                     chunks[0],
                 );
@@ -898,12 +886,9 @@ fn render_network_rules_dialog(f: &mut Frame, app: &App, area: Rect) {
                     }
                     let is_sel = i == dialog.selected;
                     let style = if is_sel {
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD)
+                        theme.selected()
                     } else {
-                        Style::default().fg(Color::White)
+                        theme.text()
                     };
                     let entry = format!(
                         "{} {} {}",
@@ -921,19 +906,18 @@ fn render_network_rules_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
-                    Paragraph::new(Span::styled(
-                        format!("  ✗ {err}"),
-                        Style::default().fg(Color::Red),
-                    )),
+                    Paragraph::new(Span::styled(format!("  ✗ {err}"), theme.danger())),
                     chunks[1],
                 );
             }
 
             f.render_widget(
-                Paragraph::new(Span::styled(
-                    "  ↑↓ select   a add   d delete   Esc close",
-                    Style::default().fg(Color::DarkGray),
-                )),
+                Paragraph::new(theme.hint_line(&[
+                    ("↑↓", "select"),
+                    ("a", "add"),
+                    ("d", "delete"),
+                    ("Esc", "close"),
+                ])),
                 chunks[2],
             );
         }
@@ -943,15 +927,10 @@ fn render_network_rules_dialog(f: &mut Frame, app: &App, area: Rect) {
             f.render_widget(Clear, popup);
 
             let block = Block::default()
-                .title(Span::styled(
-                    " Add Network Rule ",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ))
+                .title(Span::styled(" Add Network Rule ", theme.accent_bold()))
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Yellow));
+                .border_type(theme.border_unfocused_type)
+                .border_style(theme.accent());
 
             let inner = block.inner(popup);
             f.render_widget(block, popup);
@@ -965,7 +944,7 @@ fn render_network_rules_dialog(f: &mut Frame, app: &App, area: Rect) {
                 ])
                 .split(inner);
 
-            render_field(f, "CIDR ", &dialog.cidr_input, true, chunks[0]);
+            render_field(f, theme, "CIDR ", &dialog.cidr_input, true, chunks[0]);
 
             let summary = format!(
                 "Direction: {} (e/i)   Action: {} (space)",
@@ -973,23 +952,20 @@ fn render_network_rules_dialog(f: &mut Frame, app: &App, area: Rect) {
                 dialog.action.label()
             );
             f.render_widget(
-                Paragraph::new(Span::styled(summary, Style::default().fg(Color::Yellow))),
+                Paragraph::new(Span::styled(summary, theme.accent())),
                 chunks[1],
             );
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
-                    Paragraph::new(Span::styled(
-                        format!(" ✗ {err}"),
-                        Style::default().fg(Color::Red),
-                    )),
+                    Paragraph::new(Span::styled(format!(" ✗ {err}"), theme.danger())),
                     chunks[2],
                 );
             } else {
                 f.render_widget(
                     Paragraph::new(Span::styled(
                         " Type CIDR   Enter add   Esc cancel",
-                        Style::default().fg(Color::DarkGray),
+                        theme.muted(),
                     )),
                     chunks[2],
                 );
@@ -1007,6 +983,7 @@ fn render_mounts_dialog(f: &mut Frame, app: &App, area: Rect) {
     use crate::sandbox::MountSource;
 
     let dialog = &app.create_dialog.mounts_dialog;
+    let theme = &app.theme;
     if !dialog.visible {
         return;
     }
@@ -1019,15 +996,10 @@ fn render_mounts_dialog(f: &mut Frame, app: &App, area: Rect) {
             f.render_widget(Clear, popup);
 
             let block = Block::default()
-                .title(Span::styled(
-                    " Manage Volume Mounts ",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ))
+                .title(Span::styled(" Manage Volume Mounts ", theme.accent_bold()))
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Yellow));
+                .border_type(theme.border_unfocused_type)
+                .border_style(theme.accent());
 
             let inner = block.inner(popup);
             f.render_widget(block, popup);
@@ -1043,10 +1015,7 @@ fn render_mounts_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             if dialog.entries.is_empty() {
                 f.render_widget(
-                    Paragraph::new(Span::styled(
-                        "  (no mounts configured)",
-                        Style::default().fg(Color::DarkGray),
-                    )),
+                    Paragraph::new(Span::styled("  (no mounts configured)", theme.muted())),
                     chunks[0],
                 );
             } else {
@@ -1056,12 +1025,9 @@ fn render_mounts_dialog(f: &mut Frame, app: &App, area: Rect) {
                     }
                     let is_sel = i == dialog.selected;
                     let style = if is_sel {
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD)
+                        theme.selected()
                     } else {
-                        Style::default().fg(Color::White)
+                        theme.text()
                     };
                     let entry = match &mount.source {
                         MountSource::Bind(host) => {
@@ -1081,19 +1047,18 @@ fn render_mounts_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
-                    Paragraph::new(Span::styled(
-                        format!("  ✗ {err}"),
-                        Style::default().fg(Color::Red),
-                    )),
+                    Paragraph::new(Span::styled(format!("  ✗ {err}"), theme.danger())),
                     chunks[1],
                 );
             }
 
             f.render_widget(
-                Paragraph::new(Span::styled(
-                    "  ↑↓ select   a add   d delete   Esc close",
-                    Style::default().fg(Color::DarkGray),
-                )),
+                Paragraph::new(theme.hint_line(&[
+                    ("↑↓", "select"),
+                    ("a", "add"),
+                    ("d", "delete"),
+                    ("Esc", "close"),
+                ])),
                 chunks[2],
             );
         }
@@ -1103,15 +1068,10 @@ fn render_mounts_dialog(f: &mut Frame, app: &App, area: Rect) {
             f.render_widget(Clear, popup);
 
             let block = Block::default()
-                .title(Span::styled(
-                    " Add Volume Mount ",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ))
+                .title(Span::styled(" Add Volume Mount ", theme.accent_bold()))
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Yellow));
+                .border_type(theme.border_unfocused_type)
+                .border_style(theme.accent());
 
             let inner = block.inner(popup);
             f.render_widget(block, popup);
@@ -1128,6 +1088,7 @@ fn render_mounts_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             render_field(
                 f,
+                theme,
                 "Guest",
                 &dialog.guest_input,
                 dialog.add_field == 0,
@@ -1139,6 +1100,7 @@ fn render_mounts_dialog(f: &mut Frame, app: &App, area: Rect) {
             };
             render_field(
                 f,
+                theme,
                 source_label,
                 &dialog.source_input,
                 dialog.add_field == 1,
@@ -1150,27 +1112,23 @@ fn render_mounts_dialog(f: &mut Frame, app: &App, area: Rect) {
                 crate::app::MountKindChoice::Named => "Named volume (n)",
             };
             f.render_widget(
-                Paragraph::new(Span::styled(
-                    format!("Kind: {kind_label}"),
-                    Style::default().fg(Color::Yellow),
-                )),
+                Paragraph::new(Span::styled(format!("Kind: {kind_label}"), theme.accent())),
                 chunks[2],
             );
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
-                    Paragraph::new(Span::styled(
-                        format!(" ✗ {err}"),
-                        Style::default().fg(Color::Red),
-                    )),
+                    Paragraph::new(Span::styled(format!(" ✗ {err}"), theme.danger())),
                     chunks[3],
                 );
             } else {
                 f.render_widget(
-                    Paragraph::new(Span::styled(
-                        " Tab field   b/n kind   Enter add   Esc cancel",
-                        Style::default().fg(Color::DarkGray),
-                    )),
+                    Paragraph::new(theme.hint_line(&[
+                        ("Tab", "field"),
+                        ("b/n", "kind"),
+                        ("Enter", "add"),
+                        ("Esc", "cancel"),
+                    ])),
                     chunks[3],
                 );
             }

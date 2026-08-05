@@ -2,7 +2,7 @@
 
 use ratatui::{
     layout::{Constraint, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
     Frame,
@@ -12,8 +12,10 @@ use microsandbox::sandbox::SandboxStatus;
 
 use crate::app::App;
 use crate::sandbox::{FsEntry, LocalFsEntryKind};
+use crate::theme::Theme;
 
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
+    let theme = app.theme;
     let (name, is_running) = match app.selected_sandbox() {
         Some(sb) => (sb.name.clone(), sb.status == SandboxStatus::Running),
         None => return,
@@ -23,7 +25,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         f.render_widget(
             Paragraph::new(Span::styled(
                 "Sandbox is not running. Start it to browse the filesystem.",
-                Style::default().fg(Color::DarkGray),
+                theme.muted(),
             )),
             area,
         );
@@ -39,10 +41,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     if entries.is_none() {
         app.request_fs(&name, &fs_path);
         f.render_widget(
-            Paragraph::new(Span::styled(
-                "Loading filesystem…",
-                Style::default().fg(Color::DarkGray),
-            )),
+            Paragraph::new(Span::styled("Loading filesystem…", theme.muted())),
             area,
         );
         return;
@@ -51,17 +50,9 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let entries = entries.unwrap_or_default();
 
     let path_line = Paragraph::new(Line::from(vec![
-        Span::styled(" Path: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            fs_path.clone(),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            "  (Backspace to go up)",
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(" Path: ", theme.muted()),
+        Span::styled(fs_path.clone(), theme.accent_bold()),
+        Span::styled("  (Backspace to go up)", theme.muted()),
     ]));
 
     // Split: path line(1) + table
@@ -75,10 +66,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 
     if entries.is_empty() {
         f.render_widget(
-            Paragraph::new(Span::styled(
-                "  (empty directory)",
-                Style::default().fg(Color::DarkGray),
-            )),
+            Paragraph::new(Span::styled("  (empty directory)", theme.muted())),
             chunks[1],
         );
         return;
@@ -87,25 +75,11 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let visible_height = chunks[1].height as usize;
     let scroll = app.fs_scroll.min(entries.len().saturating_sub(1));
 
+    let header_style = theme.muted().add_modifier(Modifier::BOLD);
     let header = Row::new(vec![
-        Cell::from(Span::styled(
-            "Kind",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Cell::from(Span::styled(
-            "Path",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Cell::from(Span::styled(
-            "Size",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )),
+        Cell::from(Span::styled("Kind", header_style)),
+        Cell::from(Span::styled("Path", header_style)),
+        Cell::from(Span::styled("Size", header_style)),
     ])
     .height(1)
     .bottom_margin(1);
@@ -114,7 +88,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         .iter()
         .skip(scroll)
         .take(visible_height.saturating_sub(2))
-        .map(|e| entry_row(e))
+        .map(|e| entry_row(&theme, e))
         .collect();
 
     let widths = [
@@ -131,12 +105,12 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(table, chunks[1]);
 }
 
-fn entry_row(e: &FsEntry) -> Row<'_> {
+fn entry_row<'a>(theme: &Theme, e: &'a FsEntry) -> Row<'a> {
     let (icon, color) = match e.kind {
-        LocalFsEntryKind::Directory => ("dir ", Color::Blue),
-        LocalFsEntryKind::File => ("file", Color::White),
-        LocalFsEntryKind::Symlink => ("link", Color::Cyan),
-        LocalFsEntryKind::Other => ("?   ", Color::DarkGray),
+        LocalFsEntryKind::Directory => ("dir ", theme.info),
+        LocalFsEntryKind::File => ("file", theme.text),
+        LocalFsEntryKind::Symlink => ("link", theme.accent),
+        LocalFsEntryKind::Other => ("?   ", theme.text_muted),
     };
 
     let size_str = fmt_bytes(e.size);
@@ -155,7 +129,7 @@ fn entry_row(e: &FsEntry) -> Row<'_> {
                     Modifier::empty()
                 }),
         )),
-        Cell::from(Span::styled(size_str, Style::default().fg(Color::DarkGray))),
+        Cell::from(Span::styled(size_str, theme.muted())),
     ])
 }
 

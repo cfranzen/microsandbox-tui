@@ -3,7 +3,7 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Gauge, Paragraph, Sparkline},
     Frame,
@@ -11,6 +11,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::sandbox::MetricsSnapshot;
+use crate::theme::Theme;
 
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let Some(sb) = app.selected_sandbox().cloned() else {
@@ -23,19 +24,15 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         .constraints([Constraint::Length(16), Constraint::Min(0)])
         .split(area);
 
-    render_config(f, &sb, chunks[0]);
+    render_config(f, &app.theme, &sb, chunks[0]);
     render_metrics(f, app, &sb, chunks[1]);
 }
 
 /// Render the general config + timestamps section (previously the "Info" tab).
-fn render_config(f: &mut Frame, sb: &crate::sandbox::SandboxInfo, area: Rect) {
-    let key = Style::default()
-        .fg(Color::DarkGray)
-        .add_modifier(Modifier::BOLD);
-    let val = Style::default().fg(Color::White);
-    let heading = Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+fn render_config(f: &mut Frame, theme: &Theme, sb: &crate::sandbox::SandboxInfo, area: Rect) {
+    let key = theme.muted().add_modifier(Modifier::BOLD);
+    let val = theme.text();
+    let heading = theme.heading();
 
     let age = sb
         .created_at
@@ -56,12 +53,7 @@ fn render_config(f: &mut Frame, sb: &crate::sandbox::SandboxInfo, area: Rect) {
         .unwrap_or_else(|| "—".into());
 
     let status_str = format!("{:?}", sb.status);
-    let status_color = match sb.status {
-        microsandbox::sandbox::SandboxStatus::Running => Color::Green,
-        microsandbox::sandbox::SandboxStatus::Stopped => Color::Yellow,
-        microsandbox::sandbox::SandboxStatus::Crashed => Color::Red,
-        _ => Color::DarkGray,
-    };
+    let status_color = theme.status_color(sb.status);
 
     // Build strings before constructing Line values to avoid temporary lifetime issues.
     let cpus_str = sb.cpus.to_string();
@@ -99,6 +91,7 @@ fn render_config(f: &mut Frame, sb: &crate::sandbox::SandboxInfo, area: Rect) {
 
 /// Render the live metrics section (previously the "Metrics" tab).
 fn render_metrics(f: &mut Frame, app: &mut App, sb: &crate::sandbox::SandboxInfo, area: Rect) {
+    let theme = app.theme;
     let name = sb.name.clone();
     let is_running = sb.status == crate::sandbox::SandboxStatus::Running;
 
@@ -106,7 +99,7 @@ fn render_metrics(f: &mut Frame, app: &mut App, sb: &crate::sandbox::SandboxInfo
         f.render_widget(
             Paragraph::new(Span::styled(
                 "Sandbox is not running. Start it to see live metrics.",
-                Style::default().fg(Color::DarkGray),
+                theme.muted(),
             )),
             area,
         );
@@ -118,10 +111,7 @@ fn render_metrics(f: &mut Frame, app: &mut App, sb: &crate::sandbox::SandboxInfo
     if metrics.is_none() {
         app.request_metrics(&name);
         f.render_widget(
-            Paragraph::new(Span::styled(
-                "Loading metrics…",
-                Style::default().fg(Color::DarkGray),
-            )),
+            Paragraph::new(Span::styled("Loading metrics…", theme.muted())),
             area,
         );
         return;
@@ -151,14 +141,14 @@ fn render_metrics(f: &mut Frame, app: &mut App, sb: &crate::sandbox::SandboxInfo
 
     // --- CPU gauge ---
     let cpu_pct = m.cpu_percent.clamp(0.0, 100.0);
-    let cpu_color = gauge_color(cpu_pct);
+    let cpu_color = theme.gauge_color(cpu_pct);
     f.render_widget(
         Gauge::default()
             .block(
                 Block::default()
-                    .title(Span::styled(" CPU ", Style::default().fg(Color::White)))
+                    .title(Span::styled(" CPU ", theme.text()))
                     .borders(Borders::LEFT | Borders::TOP | Borders::RIGHT)
-                    .border_style(Style::default().fg(Color::DarkGray)),
+                    .border_style(theme.muted()),
             )
             .gauge_style(Style::default().fg(cpu_color))
             .percent(cpu_pct as u16)
@@ -168,6 +158,7 @@ fn render_metrics(f: &mut Frame, app: &mut App, sb: &crate::sandbox::SandboxInfo
 
     render_sparkline(
         f,
+        &theme,
         " CPU history ",
         history
             .iter()
@@ -183,14 +174,14 @@ fn render_metrics(f: &mut Frame, app: &mut App, sb: &crate::sandbox::SandboxInfo
         .and_then(|v| v.checked_div(mem_total_mib))
         .unwrap_or(0)
         .min(100);
-    let mem_color = gauge_color(mem_pct as f64);
+    let mem_color = theme.gauge_color(mem_pct as f64);
     f.render_widget(
         Gauge::default()
             .block(
                 Block::default()
-                    .title(Span::styled(" Memory ", Style::default().fg(Color::White)))
+                    .title(Span::styled(" Memory ", theme.text()))
                     .borders(Borders::LEFT | Borders::TOP | Borders::RIGHT)
-                    .border_style(Style::default().fg(Color::DarkGray)),
+                    .border_style(theme.muted()),
             )
             .gauge_style(Style::default().fg(mem_color))
             .percent(mem_pct as u16)
@@ -200,6 +191,7 @@ fn render_metrics(f: &mut Frame, app: &mut App, sb: &crate::sandbox::SandboxInfo
 
     render_sparkline(
         f,
+        &theme,
         " Memory history (MiB) ",
         history
             .iter()
@@ -210,19 +202,19 @@ fn render_metrics(f: &mut Frame, app: &mut App, sb: &crate::sandbox::SandboxInfo
     );
 
     // --- Disk usage gauge (writable overlay) ---
-    render_disk_usage(f, &m, chunks[4]);
+    render_disk_usage(f, &theme, &m, chunks[4]);
 
     // --- Disk I/O ---
     f.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(" Disk I/O  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(" Disk I/O  ", theme.muted()),
             Span::styled(
                 format!(
                     "↑ {}  ↓ {}",
                     fmt_bytes(m.disk_write_bytes),
                     fmt_bytes(m.disk_read_bytes)
                 ),
-                Style::default().fg(Color::White),
+                theme.text(),
             ),
         ])),
         chunks[5],
@@ -231,14 +223,14 @@ fn render_metrics(f: &mut Frame, app: &mut App, sb: &crate::sandbox::SandboxInfo
     // --- Network I/O ---
     f.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(" Net       ", Style::default().fg(Color::DarkGray)),
+            Span::styled(" Net       ", theme.muted()),
             Span::styled(
                 format!(
                     "↑ {}  ↓ {}",
                     fmt_bytes(m.net_tx_bytes),
                     fmt_bytes(m.net_rx_bytes)
                 ),
-                Style::default().fg(Color::White),
+                theme.text(),
             ),
         ])),
         chunks[6],
@@ -250,11 +242,8 @@ fn render_metrics(f: &mut Frame, app: &mut App, sb: &crate::sandbox::SandboxInfo
 
     f.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(" Uptime    ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                format!(" {}", uptime_str),
-                Style::default().fg(Color::White),
-            ),
+            Span::styled(" Uptime    ", theme.muted()),
+            Span::styled(format!(" {}", uptime_str), theme.text()),
         ])),
         chunks[7],
     );
@@ -262,14 +251,11 @@ fn render_metrics(f: &mut Frame, app: &mut App, sb: &crate::sandbox::SandboxInfo
 
 /// Render the writable-overlay disk usage gauge when the SDK reports it.
 /// Not every backend/config surfaces this, so we fall back to a plain hint.
-fn render_disk_usage(f: &mut Frame, m: &MetricsSnapshot, area: Rect) {
+fn render_disk_usage(f: &mut Frame, theme: &Theme, m: &MetricsSnapshot, area: Rect) {
     let block = Block::default()
-        .title(Span::styled(
-            " Disk usage ",
-            Style::default().fg(Color::White),
-        ))
+        .title(Span::styled(" Disk usage ", theme.text()))
         .borders(Borders::LEFT | Borders::TOP | Borders::RIGHT)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(theme.muted());
 
     match (m.disk_used_bytes, m.disk_free_bytes) {
         (Some(used), Some(free)) => {
@@ -279,7 +265,7 @@ fn render_disk_usage(f: &mut Frame, m: &MetricsSnapshot, area: Rect) {
                 .and_then(|v| v.checked_div(total))
                 .unwrap_or(0)
                 .min(100);
-            let color = gauge_color(pct as f64);
+            let color = theme.gauge_color(pct as f64);
             f.render_widget(
                 Gauge::default()
                     .block(block)
@@ -291,35 +277,25 @@ fn render_disk_usage(f: &mut Frame, m: &MetricsSnapshot, area: Rect) {
         }
         _ => {
             f.render_widget(
-                Paragraph::new(Span::styled(
-                    " not reported by this sandbox",
-                    Style::default().fg(Color::DarkGray),
-                ))
-                .block(block),
+                Paragraph::new(Span::styled(" not reported by this sandbox", theme.muted()))
+                    .block(block),
                 area,
             );
         }
     }
 }
 
-fn gauge_color(pct: f64) -> Color {
-    if pct >= 90.0 {
-        Color::Red
-    } else if pct >= 70.0 {
-        Color::Yellow
-    } else {
-        Color::Green
-    }
-}
-
 /// Render a labelled sparkline of recent samples for one metric.
-fn render_sparkline(f: &mut Frame, title: &str, data: impl Iterator<Item = u64>, area: Rect) {
+fn render_sparkline(
+    f: &mut Frame,
+    theme: &Theme,
+    title: &str,
+    data: impl Iterator<Item = u64>,
+    area: Rect,
+) {
     let samples: Vec<u64> = data.collect();
     let block = Block::default()
-        .title(Span::styled(
-            title.to_owned(),
-            Style::default().fg(Color::DarkGray),
-        ))
+        .title(Span::styled(title.to_owned(), theme.muted()))
         .borders(Borders::LEFT | Borders::RIGHT);
 
     if samples.is_empty() {
@@ -331,7 +307,7 @@ fn render_sparkline(f: &mut Frame, title: &str, data: impl Iterator<Item = u64>,
         Sparkline::default()
             .block(block)
             .data(&samples)
-            .style(Style::default().fg(Color::Cyan)),
+            .style(theme.accent()),
         area,
     );
 }
