@@ -31,9 +31,8 @@ A Rust TUI application for managing MicroSandboxes, built with [ratatui](https:/
 | `src/ui/sandbox_list.rs` | ✅ done | Left panel: sandbox cards with status indicator, image, resources, action hints |
 | `src/ui/detail.rs` | ✅ done | Right panel: tab bar + dispatch to tab-specific renderers |
 | `src/ui/logs.rs` | ✅ done | Logs tab: coloured log lines, source badges (OUT/ERR/PTY/SYS), scroll |
-| `src/ui/metrics.rs` | ✅ done | Metrics tab: CPU bar, memory bar, disk I/O, network I/O, uptime |
 | `src/ui/filesystem.rs` | ✅ done | Filesystem tab: directory listing, kind icons, size column, navigate up with Backspace |
-| `src/ui/info.rs` | ✅ done | Info tab: full sandbox config dump (image, CPUs, memory, created/updated timestamps) |
+| `src/ui/info.rs` | ✅ done | Info tab: sandbox config dump (image, CPUs, memory, created/updated timestamps) + live metrics (CPU/memory/disk gauges with sparkline history, disk I/O, network I/O, uptime) |
 | `src/ui/create_dialog.rs` | ✅ done | "New Sandbox" modal: name, image, CPUs, memory fields; validation error display |
 
 ---
@@ -71,17 +70,6 @@ A Rust TUI application for managing MicroSandboxes, built with [ratatui](https:/
 - [x] Colour-code by source (stdout=green, stderr=red, system=grey)
 - [x] Auto-scroll to bottom on new entries
 
-### Metrics Tab
-
-- [x] Point-in-time fetch via `Sandbox::metrics()` through `connect()`
-- [x] Cached per sandbox name
-- [x] Auto-refresh every 3 seconds when tab is active
-- [x] CPU usage gauge / bar
-- [x] Memory usage gauge with MiB/MiB display
-- [x] Disk read/write byte counters
-- [x] Network rx/tx byte counters
-- [x] Uptime display
-
 ### Filesystem Tab
 
 - [x] Directory listing via `sb.fs().list(path)` through `connect()`
@@ -96,6 +84,15 @@ A Rust TUI application for managing MicroSandboxes, built with [ratatui](https:/
 - [x] Parse `SandboxHandle::config()` and display structured config
 - [x] Show image, CPUs, memory
 - [x] Show `created_at` and `updated_at` timestamps
+- [x] Live metrics merged in: point-in-time fetch via `Sandbox::metrics()` through
+      `connect()`, cached per sandbox name, auto-refreshed every 3 seconds while the
+      tab is active
+- [x] CPU usage gauge / bar with rolling sparkline history (last 60 samples)
+- [x] Memory usage gauge with MiB/MiB display and rolling sparkline history
+- [x] Disk usage gauge (writable overlay used/free bytes), when reported by the SDK
+- [x] Disk read/write byte counters
+- [x] Network rx/tx byte counters
+- [x] Uptime display
 
 ### Create Dialog
 

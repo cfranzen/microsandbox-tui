@@ -167,35 +167,35 @@ async fn test_render_logs_tab_shows_label() {
 }
 
 #[tokio::test]
-async fn test_render_metrics_tab_no_panic() {
+async fn test_render_info_tab_metrics_no_panic() {
     let mut terminal = make_terminal();
     let mut app = make_app();
     app.sandboxes
         .push(make_sandbox("box", SandboxStatus::Running));
-    app.tab = DetailTab::Metrics;
+    app.tab = DetailTab::Info;
     seed_metrics(&mut app, "box");
     render_to_string(&mut terminal, &mut app);
 }
 
 #[tokio::test]
-async fn test_render_metrics_tab_shows_label() {
+async fn test_render_info_tab_shows_metrics_label() {
     let mut terminal = make_terminal();
     let mut app = make_app();
     app.sandboxes
         .push(make_sandbox("box", SandboxStatus::Running));
-    app.tab = DetailTab::Metrics;
+    app.tab = DetailTab::Info;
     seed_metrics(&mut app, "box");
     let buf = render_to_string(&mut terminal, &mut app);
-    assert!(buf.contains("Metrics"));
+    assert!(buf.contains("CPU"));
 }
 
 #[tokio::test]
-async fn test_render_metrics_tab_with_data() {
+async fn test_render_info_tab_with_metrics_data() {
     let mut terminal = make_terminal();
     let mut app = make_app();
     app.sandboxes
         .push(make_sandbox("box", SandboxStatus::Running));
-    app.tab = DetailTab::Metrics;
+    app.tab = DetailTab::Info;
     app.metrics.insert(
         "box".into(),
         MetricsSnapshot {

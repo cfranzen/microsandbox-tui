@@ -23,11 +23,12 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 - **Logs tab** — scrollable, colour-coded log output by source (stdout / stderr / pty /
   system); live-tails new output for running sandboxes via the SDK's log-streaming API
   (falls back to a one-shot read for stopped sandboxes)
-- **Metrics tab** — live CPU and memory gauges, disk I/O counters, network rx/tx, uptime,
-  plus rolling sparkline history (last 60 samples) for CPU % and memory usage
 - **Filesystem tab** — browse the sandbox filesystem; navigate into directories with
   `Enter`, go up with `Backspace`
-- **Info tab** — full sandbox configuration (image, CPUs, memory, timestamps)
+- **Info tab** — full sandbox configuration (image, CPUs, memory, timestamps) together
+  with live metrics: CPU and memory gauges with rolling sparkline history (last 60
+  samples), a writable-overlay disk usage gauge (when reported by the sandbox), disk I/O
+  counters, network rx/tx, and uptime
 - **Create dialog** — two-tab modal covering all
   [SandboxConfig](https://docs.microsandbox.dev/sdk/rust/sandbox#sandboxconfig) options:
   - **Basic tab**: Name, Image, CPUs, Memory, Port mappings, Environment variables,
@@ -86,7 +87,7 @@ panel title shows the current filter text.
 #### Mouse support
 
 - Click a sandbox card to select it.
-- Click a detail tab label (Logs / Metrics / Filesystem / Info) to switch to it and
+- Click a detail tab label (Logs / Filesystem / Info) to switch to it and
   focus the detail panel.
 - Click anywhere else in the list or detail panel to focus that panel.
 - Scroll the wheel over the sandbox list to move the selection up/down.
@@ -233,9 +234,8 @@ src/
     ├── sandbox_list.rs  # Left panel: sandbox cards
     ├── detail.rs        # Right panel: tab bar
     ├── logs.rs          # Logs tab
-    ├── metrics.rs       # Metrics tab
     ├── filesystem.rs    # Filesystem tab
-    ├── info.rs          # Info tab
+    ├── info.rs          # Info tab (config + timestamps + live metrics)
     └── create_dialog.rs # New sandbox modal + directory picker
 tests/
 └── ui_rendering.rs     # Integration tests for UI rendering

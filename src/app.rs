@@ -48,7 +48,6 @@ pub enum Focus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetailTab {
     Logs,
-    Metrics,
     Filesystem,
     Info,
 }
@@ -57,19 +56,13 @@ impl DetailTab {
     pub fn title(self) -> &'static str {
         match self {
             DetailTab::Logs => "Logs",
-            DetailTab::Metrics => "Metrics",
             DetailTab::Filesystem => "Filesystem",
             DetailTab::Info => "Info",
         }
     }
 
     pub fn all() -> &'static [DetailTab] {
-        &[
-            DetailTab::Logs,
-            DetailTab::Metrics,
-            DetailTab::Filesystem,
-            DetailTab::Info,
-        ]
+        &[DetailTab::Logs, DetailTab::Filesystem, DetailTab::Info]
     }
 }
 
@@ -1050,12 +1043,11 @@ pub async fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> 
                 if let Some(sb) = app.selected_sandbox().cloned() {
                     match app.tab {
                         DetailTab::Logs => app.sync_log_stream(),
-                        DetailTab::Metrics => app.request_metrics(&sb.name),
                         DetailTab::Filesystem => {
                             let path = app.fs_path.clone();
                             app.request_fs(&sb.name, &path);
                         }
-                        DetailTab::Info => {}
+                        DetailTab::Info => app.request_metrics(&sb.name),
                     }
                 }
             }
@@ -2150,12 +2142,11 @@ fn on_sandbox_selected(app: &mut App) {
     if let Some(sb) = app.selected_sandbox().cloned() {
         match app.tab {
             DetailTab::Logs => app.sync_log_stream(),
-            DetailTab::Metrics => app.request_metrics(&sb.name),
             DetailTab::Filesystem => {
                 let path = app.fs_path.clone();
                 app.request_fs(&sb.name, &path);
             }
-            DetailTab::Info => {}
+            DetailTab::Info => app.request_metrics(&sb.name),
         }
     }
 }
@@ -2164,12 +2155,11 @@ fn on_tab_switched(app: &mut App) {
     if let Some(sb) = app.selected_sandbox().cloned() {
         match app.tab {
             DetailTab::Logs => app.sync_log_stream(),
-            DetailTab::Metrics => app.request_metrics(&sb.name),
             DetailTab::Filesystem => {
                 let path = app.fs_path.clone();
                 app.request_fs(&sb.name, &path);
             }
-            DetailTab::Info => {}
+            DetailTab::Info => app.request_metrics(&sb.name),
         }
     }
 }
@@ -2489,7 +2479,7 @@ mod tests {
     fn test_log_stream_target_none_when_not_on_logs_tab() {
         let mut app = make_app();
         app.sandboxes.push(make_sandbox("alpha", Status::Running));
-        app.tab = DetailTab::Metrics;
+        app.tab = DetailTab::Info;
         assert!(app.log_stream_target().is_none());
     }
 
@@ -2641,8 +2631,6 @@ mod tests {
         let mut app = make_app();
         assert_eq!(app.tab, DetailTab::Logs);
         app.next_tab();
-        assert_eq!(app.tab, DetailTab::Metrics);
-        app.next_tab();
         assert_eq!(app.tab, DetailTab::Filesystem);
         app.next_tab();
         assert_eq!(app.tab, DetailTab::Info);
@@ -2657,8 +2645,6 @@ mod tests {
         assert_eq!(app.tab, DetailTab::Info); // wraps
         app.prev_tab();
         assert_eq!(app.tab, DetailTab::Filesystem);
-        app.prev_tab();
-        assert_eq!(app.tab, DetailTab::Metrics);
         app.prev_tab();
         assert_eq!(app.tab, DetailTab::Logs);
     }
@@ -2776,14 +2762,13 @@ mod tests {
     #[test]
     fn test_detail_tab_titles() {
         assert_eq!(DetailTab::Logs.title(), "Logs");
-        assert_eq!(DetailTab::Metrics.title(), "Metrics");
         assert_eq!(DetailTab::Filesystem.title(), "Filesystem");
         assert_eq!(DetailTab::Info.title(), "Info");
     }
 
     #[test]
-    fn test_detail_tab_all_has_four_entries() {
-        assert_eq!(DetailTab::all().len(), 4);
+    fn test_detail_tab_all_has_three_entries() {
+        assert_eq!(DetailTab::all().len(), 3);
     }
 
     // ── handle_message ───────────────────────────────────────────────────────
@@ -3436,7 +3421,7 @@ mod tests {
         let mut app = make_app();
         app.focus = Focus::Detail;
         handle_event(&mut app, key_press(KeyCode::Right));
-        assert_eq!(app.tab, DetailTab::Metrics);
+        assert_eq!(app.tab, DetailTab::Filesystem);
     }
 
     #[tokio::test]
@@ -3444,14 +3429,14 @@ mod tests {
         let mut app = make_app();
         app.focus = Focus::Detail;
         handle_event(&mut app, key_press(KeyCode::Char('l')));
-        assert_eq!(app.tab, DetailTab::Metrics);
+        assert_eq!(app.tab, DetailTab::Filesystem);
     }
 
     #[tokio::test]
     async fn test_left_goes_back_tab_in_detail_focus() {
         let mut app = make_app();
         app.focus = Focus::Detail;
-        app.tab = DetailTab::Metrics;
+        app.tab = DetailTab::Filesystem;
         handle_event(&mut app, key_press(KeyCode::Left));
         assert_eq!(app.tab, DetailTab::Logs);
     }
@@ -3756,14 +3741,14 @@ mod tests {
         app.sandboxes.push(make_sandbox("box0", Status::Running));
         app.mouse.tab_rects = vec![
             (Rect::new(0, 0, 8, 1), DetailTab::Logs),
-            (Rect::new(8, 0, 10, 1), DetailTab::Metrics),
+            (Rect::new(8, 0, 10, 1), DetailTab::Filesystem),
         ];
         app.tab = DetailTab::Logs;
         handle_event(
             &mut app,
             mouse_event(MouseEventKind::Down(MouseButton::Left), 9, 0),
         );
-        assert_eq!(app.tab, DetailTab::Metrics);
+        assert_eq!(app.tab, DetailTab::Filesystem);
         assert_eq!(app.focus, Focus::Detail);
     }
 

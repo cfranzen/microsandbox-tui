@@ -59,6 +59,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mouse input is ignored while the create dialog, Volumes view, or search
   box is active.
 
+### Changed
+- Merged the Metrics tab into the Info tab: the Info tab now shows sandbox
+  configuration/timestamps together with live CPU/memory gauges (with
+  sparkline history), disk and network I/O counters, and uptime, all in one
+  place. The detail panel is down to three tabs: Logs, Filesystem, Info.
+- Added a disk usage gauge to the merged Info tab, showing the writable
+  overlay's used/free bytes (`SandboxMetrics::upper_used_bytes` /
+  `upper_free_bytes`) when the SDK reports them for a sandbox; falls back to
+  a "not reported" hint otherwise.
+
 ## [0.1.0] - 2026-07-25
 
 ### Added

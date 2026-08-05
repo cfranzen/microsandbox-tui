@@ -135,7 +135,6 @@ fn render_separator(f: &mut Frame, area: Rect) {
 fn render_tab_content(f: &mut Frame, app: &mut App, area: Rect) {
     match app.tab {
         DetailTab::Logs => super::logs::render(f, app, area),
-        DetailTab::Metrics => super::metrics::render(f, app, area),
         DetailTab::Filesystem => super::filesystem::render(f, app, area),
         DetailTab::Info => super::info::render(f, app, area),
     }

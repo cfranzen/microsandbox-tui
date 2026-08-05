@@ -36,6 +36,10 @@ pub struct MetricsSnapshot {
     pub disk_write_bytes: u64,
     pub net_rx_bytes: u64,
     pub net_tx_bytes: u64,
+    /// Guest-visible OCI upper (writable overlay) filesystem used bytes, when reported.
+    pub disk_used_bytes: Option<u64>,
+    /// Guest-visible OCI upper (writable overlay) filesystem free bytes, when reported.
+    pub disk_free_bytes: Option<u64>,
     pub uptime_secs: u64,
 }
 
@@ -391,6 +395,8 @@ pub async fn fetch_metrics(name: &str) -> Result<Option<MetricsSnapshot>> {
         disk_write_bytes: m.disk_write_bytes,
         net_rx_bytes: m.net_rx_bytes,
         net_tx_bytes: m.net_tx_bytes,
+        disk_used_bytes: m.upper_used_bytes,
+        disk_free_bytes: m.upper_free_bytes,
         uptime_secs: m.uptime.as_secs(),
     }))
 }
@@ -532,6 +538,8 @@ mod tests {
         assert_eq!(m.disk_write_bytes, 0);
         assert_eq!(m.net_rx_bytes, 0);
         assert_eq!(m.net_tx_bytes, 0);
+        assert_eq!(m.disk_used_bytes, None);
+        assert_eq!(m.disk_free_bytes, None);
         assert_eq!(m.uptime_secs, 0);
     }
 
@@ -544,10 +552,14 @@ mod tests {
             disk_write_bytes: 500_000,
             net_rx_bytes: 4096,
             net_tx_bytes: 2048,
+            disk_used_bytes: Some(128 * 1024 * 1024),
+            disk_free_bytes: Some(896 * 1024 * 1024),
             uptime_secs: 3661,
         };
         assert!((m.cpu_percent - 75.5).abs() < f64::EPSILON);
         assert_eq!(m.memory_bytes, 256 * 1024 * 1024);
+        assert_eq!(m.disk_used_bytes, Some(128 * 1024 * 1024));
+        assert_eq!(m.disk_free_bytes, Some(896 * 1024 * 1024));
         assert_eq!(m.uptime_secs, 3661);
     }
 
