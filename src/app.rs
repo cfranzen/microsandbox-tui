@@ -1141,8 +1141,9 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
             app.focus = Focus::SandboxList;
         }
 
-        // Focus switching: Tab toggles, and Left/Right arrows move directly
-        // between the sandbox list and the detail panel.
+        // Focus switching: Tab toggles between the sandbox list and detail
+        // panel. Left/Right move from the list into the detail panel (Right)
+        // and, once the detail panel is focused, cycle its tabs instead.
         KeyCode::Tab => {
             app.focus = match app.focus {
                 Focus::SandboxList => Focus::Detail,
@@ -1150,14 +1151,22 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
             };
         }
         KeyCode::Left => {
-            app.focus = Focus::SandboxList;
+            if app.focus == Focus::Detail {
+                app.prev_tab();
+                on_tab_switched(app);
+            }
         }
         KeyCode::Right => {
-            app.focus = Focus::Detail;
+            if app.focus == Focus::SandboxList {
+                app.focus = Focus::Detail;
+            } else {
+                app.next_tab();
+                on_tab_switched(app);
+            }
         }
 
         // Navigation depends on focus
-        KeyCode::Up | KeyCode::Char('k') => {
+        KeyCode::Up => {
             if app.focus == Focus::SandboxList {
                 app.select_prev();
                 on_sandbox_selected(app);
@@ -1165,23 +1174,13 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
                 scroll_up(app);
             }
         }
-        KeyCode::Down | KeyCode::Char('j') => {
+        KeyCode::Down => {
             if app.focus == Focus::SandboxList {
                 app.select_next();
                 on_sandbox_selected(app);
             } else {
                 scroll_down(app);
             }
-        }
-
-        // Detail panel tab switching (vi-style keys, only while detail is focused)
-        KeyCode::Char('h') if app.focus == Focus::Detail => {
-            app.prev_tab();
-            on_tab_switched(app);
-        }
-        KeyCode::Char('l') if app.focus == Focus::Detail => {
-            app.next_tab();
-            on_tab_switched(app);
         }
 
         // Sandbox actions (only when focus is on the list)
@@ -3355,15 +3354,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_j_moves_selection_in_list() {
-        let mut app = make_app();
-        app.sandboxes.push(make_sandbox("a", Status::Running));
-        app.sandboxes.push(make_sandbox("b", Status::Running));
-        handle_event(&mut app, key_press(KeyCode::Char('j')));
-        assert_eq!(app.selected, 1);
-    }
-
-    #[tokio::test]
     async fn test_up_moves_selection_in_list() {
         let mut app = make_app();
         app.sandboxes.push(make_sandbox("a", Status::Running));
@@ -3374,29 +3364,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k_moves_selection_in_list() {
-        let mut app = make_app();
-        app.sandboxes.push(make_sandbox("a", Status::Running));
-        app.sandboxes.push(make_sandbox("b", Status::Running));
-        app.selected = 1;
-        handle_event(&mut app, key_press(KeyCode::Char('k')));
-        assert_eq!(app.selected, 0);
-    }
-
-    #[tokio::test]
-    async fn test_l_advances_tab_in_detail_focus() {
+    async fn test_right_advances_tab_in_detail_focus() {
         let mut app = make_app();
         app.focus = Focus::Detail;
-        handle_event(&mut app, key_press(KeyCode::Char('l')));
+        handle_event(&mut app, key_press(KeyCode::Right));
         assert_eq!(app.tab, DetailTab::Filesystem);
     }
 
     #[tokio::test]
-    async fn test_h_goes_back_tab_in_detail_focus() {
+    async fn test_left_goes_back_tab_in_detail_focus() {
         let mut app = make_app();
         app.focus = Focus::Detail;
         app.tab = DetailTab::Filesystem;
-        handle_event(&mut app, key_press(KeyCode::Char('h')));
+        handle_event(&mut app, key_press(KeyCode::Left));
         assert_eq!(app.tab, DetailTab::Logs);
     }
 
@@ -3409,11 +3389,12 @@ mod tests {
     }
 
     #[test]
-    fn test_left_switches_focus_to_sandbox_list() {
+    fn test_left_does_nothing_in_list_focus() {
         let mut app = make_app();
-        app.focus = Focus::Detail;
+        assert_eq!(app.focus, Focus::SandboxList);
         handle_event(&mut app, key_press(KeyCode::Left));
         assert_eq!(app.focus, Focus::SandboxList);
+        assert_eq!(app.tab, DetailTab::Logs); // unchanged
     }
 
     #[tokio::test]

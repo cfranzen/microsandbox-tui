@@ -60,12 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overlay's used/free bytes (`SandboxMetrics::upper_used_bytes` /
   `upper_free_bytes`) when the SDK reports them for a sandbox; falls back to
   a "not reported" hint otherwise.
-- Simplified navigation: `←`/`→` now switch focus between the sandbox list
-  and detail panel (alongside `Tab`), while `h`/`l` remain dedicated to
-  cycling detail tabs when the detail panel is focused. The separate `s`
-  (start) and `S` (stop) shortcuts were merged into a single `s` key that
-  starts a stopped sandbox or stops a running one, since a sandbox can only
-  ever be started or stopped, never both.
+- Simplified navigation: `Tab` switches focus between the sandbox list and
+  detail panel; `→` also moves focus from the list into the detail panel
+  and, once the detail panel is focused, `←`/`→` cycle its tabs instead. The
+  vi-style `j`/`k`/`h`/`l` keys have been removed — only the arrow keys and
+  `Tab` are used for navigation now. The separate `s` (start) and `S` (stop)
+  shortcuts were merged into a single `s` key that starts a stopped sandbox
+  or stops a running one, since a sandbox can only ever be started or
+  stopped, never both.
 - Destructive actions now require confirmation: stopping or killing a
   running sandbox, removing a sandbox, and removing a volume all open an
   "Are you sure?" modal (confirm with `y`/`Enter`, cancel with `n`/`Esc`)

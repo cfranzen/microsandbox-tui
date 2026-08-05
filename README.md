@@ -49,12 +49,12 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 | Key | Action |
 |-----|--------|
 | `q` / `Q` / `Ctrl-c` | Quit |
-| `↑` / `k` | Move up in list / scroll up in detail panel |
-| `↓` / `j` | Move down in list / scroll down in detail panel |
-| `Tab` / `←` / `→` | Switch focus between sandbox list and detail panel |
+| `↑` | Move up in list / scroll up in detail panel |
+| `↓` | Move down in list / scroll down in detail panel |
+| `Tab` | Switch focus between sandbox list and detail panel |
+| `→` | Switch focus to detail panel *(list focus)*, or go to the next detail tab *(detail focus)* |
+| `←` | Go to the previous detail tab *(detail panel focus only)* |
 | `Esc` | Return focus to sandbox list |
-| `h` | Previous detail tab *(detail panel focus only)* |
-| `l` | Next detail tab *(detail panel focus only)* |
 | `Enter` | Open "New Sandbox" dialog (when placeholder is selected) or switch focus to detail panel |
 | `n` | Open "New Sandbox" dialog |
 | `s` | Start selected sandbox if stopped, or stop it (with confirmation) if running *(list focus only)* |
