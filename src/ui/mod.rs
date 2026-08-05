@@ -1,5 +1,6 @@
 //! Top-level UI rendering dispatcher.
 
+mod confirm_dialog;
 mod create_dialog;
 mod detail;
 mod filesystem;
@@ -30,5 +31,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
     }
     if app.volumes_view.visible {
         volumes::render(f, app, f.area());
+    }
+    if app.confirm.is_some() {
+        confirm_dialog::render(f, app, f.area());
     }
 }

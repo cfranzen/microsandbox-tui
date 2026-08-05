@@ -150,7 +150,13 @@ A Rust TUI application for managing MicroSandboxes, built with [ratatui](https:/
 - [x] Metrics history sparkline / time series chart
 - [x] Network policy editor (add/remove CIDR rules)
 - [x] Volume/mount management
-- [x] Multiple sandbox selection for bulk operations
 - [x] Search/filter sandboxes by name or status
 - [x] Config file for default sandbox parameters
 - [x] Mouse support
+- [x] ~~Multiple sandbox selection for bulk operations~~ (removed again — replaced
+      with simpler single-sandbox actions plus confirmation dialogs; see
+      "Navigation simplification" below)
+- [x] Navigation simplification: `←`/`→`/`Tab` switch focus between the sandbox
+      list and detail panel, a single `s` key toggles start/stop based on
+      sandbox state, and destructive actions (stop, kill, remove sandbox,
+      remove volume) show an "Are you sure?" confirmation dialog

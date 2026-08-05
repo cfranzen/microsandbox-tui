@@ -31,14 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mounts, applied via the sandbox builder's `.volume(...)` at creation time.
   As with network policy, existing sandboxes' mounts cannot be changed after
   creation — documented as a known SDK limitation.
-- Multi-select bulk operations: press `Space` on a sandbox in the list to
-  mark/unmark it (shown with a `☑` prefix and a yellow card border). When one
-  or more sandboxes are marked, `s`/`S`/`K`/`d` apply Start/Stop/Kill/Remove
-  to all marked sandboxes concurrently (filtered to the ones eligible for
-  that action, e.g. only stopped sandboxes are started) instead of the
-  highlighted sandbox, and a single summary notification reports how many
-  succeeded. Marks are cleared after the bulk action runs and are
-  automatically pruned if a marked sandbox disappears from a refreshed list.
 - Search/filter: press `/` to open a live search box in the sandbox list.
   Typing filters sandboxes by substring match on name; `status:running`,
   `status:stopped`, and `status:crashed` tokens filter by status and can be
@@ -68,6 +60,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overlay's used/free bytes (`SandboxMetrics::upper_used_bytes` /
   `upper_free_bytes`) when the SDK reports them for a sandbox; falls back to
   a "not reported" hint otherwise.
+- Simplified navigation: `←`/`→` now switch focus between the sandbox list
+  and detail panel (alongside `Tab`), while `h`/`l` remain dedicated to
+  cycling detail tabs when the detail panel is focused. The separate `s`
+  (start) and `S` (stop) shortcuts were merged into a single `s` key that
+  starts a stopped sandbox or stops a running one, since a sandbox can only
+  ever be started or stopped, never both.
+- Destructive actions now require confirmation: stopping or killing a
+  running sandbox, removing a sandbox, and removing a volume all open an
+  "Are you sure?" modal (confirm with `y`/`Enter`, cancel with `n`/`Esc`)
+  before running.
+
+### Removed
+- Multi-select bulk operations (marking sandboxes with `Space` and applying
+  Start/Stop/Kill/Remove to all marked sandboxes at once). Replaced with
+  single-sandbox actions plus confirmation dialogs for destructive ones,
+  per simplified navigation above.
 
 ## [0.1.0] - 2026-07-25
 

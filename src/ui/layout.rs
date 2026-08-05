@@ -98,11 +98,18 @@ pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(" quit  ", dim),
         Span::styled("↑↓/jk", key),
         Span::styled(" navigate  ", dim),
-        Span::styled("Tab", key),
+        Span::styled("←→/Tab", key),
         Span::styled(" switch panel  ", dim),
     ];
 
-    if app.search_active {
+    if app.confirm.is_some() {
+        spans = vec![
+            Span::styled("y/Enter", key),
+            Span::styled(" confirm  ", dim),
+            Span::styled("n/Esc", key),
+            Span::styled(" cancel", dim),
+        ];
+    } else if app.search_active {
         spans = vec![
             Span::styled("Type", key),
             Span::styled(" to filter  ", dim),
@@ -135,12 +142,8 @@ pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         use crate::app::Focus;
         if app.focus == Focus::SandboxList && !app.new_sandbox_selected() {
             spans.extend([
-                Span::styled("Space", key),
-                Span::styled(" mark  ", dim),
                 Span::styled("s", key),
-                Span::styled(" start  ", dim),
-                Span::styled("S", key),
-                Span::styled(" stop  ", dim),
+                Span::styled(" start/stop  ", dim),
                 Span::styled("K", key),
                 Span::styled(" kill  ", dim),
                 Span::styled("d", key),

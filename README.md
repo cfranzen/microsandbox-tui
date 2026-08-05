@@ -9,10 +9,9 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 - **Sandbox list** — colour-coded status cards (🟢 running · 🟡 stopped · 🔴 crashed)
   with image, CPU/memory config, and age
 - **Lifecycle management** — create, start, stop, kill, and remove sandboxes from the
-  keyboard
-- **Multi-select bulk operations** — mark multiple sandboxes with `Space` (shown with a
-  `☑` prefix and yellow border) and apply Start/Stop/Kill/Remove to all marked
-  sandboxes at once; actions run concurrently and report a single summary notification
+  keyboard; a single `s` key toggles start/stop depending on the sandbox's current
+  state, and destructive actions (stop, kill, remove) show an "Are you sure?"
+  confirmation dialog before running
 - **Search/filter** — press `/` to search sandboxes live by substring on name, or use
   `status:running` / `status:stopped` / `status:crashed` tokens to filter by status; the
   active filter is shown in the panel title and stays applied until cleared with `Esc`
@@ -52,27 +51,26 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 | `q` / `Q` / `Ctrl-c` | Quit |
 | `↑` / `k` | Move up in list / scroll up in detail panel |
 | `↓` / `j` | Move down in list / scroll down in detail panel |
-| `Tab` | Switch focus between sandbox list and detail panel |
+| `Tab` / `←` / `→` | Switch focus between sandbox list and detail panel |
 | `Esc` | Return focus to sandbox list |
-| `←` / `h` | Previous detail tab *(detail panel focus only)* |
-| `→` / `l` | Next detail tab *(detail panel focus only)* |
+| `h` | Previous detail tab *(detail panel focus only)* |
+| `l` | Next detail tab *(detail panel focus only)* |
 | `Enter` | Open "New Sandbox" dialog (when placeholder is selected) or switch focus to detail panel |
 | `n` | Open "New Sandbox" dialog |
-| `Space` | Mark/unmark the highlighted sandbox for a bulk action *(list focus only)* |
-| `s` | Start selected sandbox, or all marked sandboxes if any are marked *(list focus only)* |
-| `S` | Stop selected sandbox, or all marked sandboxes if any are marked *(list focus only)* |
-| `K` | Kill selected sandbox (SIGKILL), or all marked sandboxes if any are marked *(list focus only)* |
-| `d` | Remove selected sandbox, or all marked sandboxes if any are marked *(list focus only)* |
+| `s` | Start selected sandbox if stopped, or stop it (with confirmation) if running *(list focus only)* |
+| `K` | Kill selected sandbox (SIGKILL), with confirmation *(list focus only)* |
+| `d` | Remove selected sandbox, with confirmation *(list focus only)* |
 | `v` | Open Volumes view |
 | `/` | Enter search/filter mode *(list focus only)* |
 | `r` | Force refresh |
 | `Backspace` | Navigate up one directory *(Filesystem tab only)* |
 
-Bulk actions only apply to marked sandboxes that are eligible for that action (e.g. `s`
-only starts marked sandboxes that are stopped, `d` only removes marked sandboxes that
-aren't running); ineligible marks are skipped and reported in the summary count. Marks
-are cleared once a bulk action is dispatched and are automatically dropped if a marked
-sandbox is removed elsewhere.
+#### Confirmation dialog
+
+Destructive actions — stopping or killing a running sandbox, removing a sandbox, and
+removing a volume — open an "Are you sure?" modal before running. Press `y` or `Enter`
+to confirm, or `n`/`Esc` to cancel. No other input is processed while the dialog is
+open.
 
 #### Search / filter
 
