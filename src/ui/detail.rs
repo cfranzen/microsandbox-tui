@@ -113,14 +113,6 @@ fn render_tab_bar(f: &mut Frame, app: &mut App, area: Rect) {
         x += label_width + 2;
     }
 
-    // Show ←/→ hint when detail is focused
-    if app.focus == Focus::Detail {
-        spans.push(Span::styled(
-            "←→ switch",
-            Style::default().fg(Color::DarkGray),
-        ));
-    }
-
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
