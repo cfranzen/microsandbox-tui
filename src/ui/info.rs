@@ -20,7 +20,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     // Split: config/timestamp block (fixed height) + live metrics (remaining space).
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(11), Constraint::Min(0)])
+        .constraints([Constraint::Length(16), Constraint::Min(0)])
         .split(area);
 
     render_config(f, &sb, chunks[0]);
@@ -89,6 +89,9 @@ fn render_config(f: &mut Frame, sb: &crate::sandbox::SandboxInfo, area: Rect) {
         kv("  Created    ", &created, key, val),
         kv("  Age        ", &age, key, val),
         kv("  Updated    ", &updated, key, val),
+        Line::raw(""),
+        Line::from(Span::styled("  Metrics", heading)),
+        Line::raw(""),
     ];
 
     f.render_widget(Paragraph::new(lines), area);
