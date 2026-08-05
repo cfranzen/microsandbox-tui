@@ -1027,10 +1027,20 @@ fn test_tab_switches_focus_list_to_detail() {
 }
 
 #[test]
-fn test_tab_switches_focus_detail_to_list() {
+fn test_tab_advances_tab_in_detail_focus() {
     let mut app = make_app();
     app.focus = Focus::Detail;
     handle_event(&mut app, key_press(KeyCode::Tab));
+    assert_eq!(app.focus, Focus::Detail);
+    assert_eq!(app.tab, DetailTab::Filesystem);
+}
+
+#[test]
+fn test_backtab_from_leftmost_tab_switches_focus_to_list() {
+    let mut app = make_app();
+    app.focus = Focus::Detail;
+    assert_eq!(app.tab, DetailTab::Logs); // leftmost tab
+    handle_event(&mut app, key_press(KeyCode::BackTab));
     assert_eq!(app.focus, Focus::SandboxList);
 }
 
@@ -1092,6 +1102,16 @@ fn test_left_does_nothing_in_list_focus() {
     handle_event(&mut app, key_press(KeyCode::Left));
     assert_eq!(app.focus, Focus::SandboxList);
     assert_eq!(app.tab, DetailTab::Logs); // unchanged
+}
+
+#[test]
+fn test_left_from_leftmost_tab_switches_focus_to_list() {
+    let mut app = make_app();
+    app.focus = Focus::Detail;
+    assert_eq!(app.tab, DetailTab::Logs); // leftmost tab
+    handle_event(&mut app, key_press(KeyCode::Left));
+    assert_eq!(app.focus, Focus::SandboxList);
+    assert_eq!(app.tab, DetailTab::Logs); // tab itself is unchanged
 }
 
 #[tokio::test]

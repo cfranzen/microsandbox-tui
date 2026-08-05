@@ -101,29 +101,12 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
             app.focus = Focus::SandboxList;
         }
 
-        // Focus switching: Tab toggles between the sandbox list and detail
-        // panel. Left/Right move from the list into the detail panel (Right)
-        // and, once the detail panel is focused, cycle its tabs instead.
-        KeyCode::Tab => {
-            app.focus = match app.focus {
-                Focus::SandboxList => Focus::Detail,
-                Focus::Detail => Focus::SandboxList,
-            };
-        }
-        KeyCode::Left => {
-            if app.focus == Focus::Detail {
-                app.prev_tab();
-                on_tab_switched(app);
-            }
-        }
-        KeyCode::Right => {
-            if app.focus == Focus::SandboxList {
-                app.focus = Focus::Detail;
-            } else {
-                app.next_tab();
-                on_tab_switched(app);
-            }
-        }
+        // Focus/tab navigation: Left/Right and Tab/Shift+Tab are equivalent.
+        // From the sandbox list, Right/Tab move into the detail panel; from
+        // the detail panel, Left/Shift+Tab cycle its tabs backward and step
+        // back out to the sandbox list once the leftmost tab is reached.
+        KeyCode::Tab | KeyCode::Right => nav_right(app),
+        KeyCode::BackTab | KeyCode::Left => nav_left(app),
 
         // Navigation depends on focus
         KeyCode::Up => {
@@ -181,6 +164,33 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
         }
 
         _ => {}
+    }
+}
+
+/// Move focus/selection one step to the right: from the sandbox list into
+/// the detail panel, or forward through the detail panel's tabs.
+fn nav_right(app: &mut App) {
+    match app.focus {
+        Focus::SandboxList => app.focus = Focus::Detail,
+        Focus::Detail => {
+            app.next_tab();
+            on_tab_switched(app);
+        }
+    }
+}
+
+/// Move focus/selection one step to the left: backward through the detail
+/// panel's tabs, stepping out to the sandbox list once the leftmost tab
+/// (the first entry of [`DetailTab::all`]) is reached. No-op on the
+/// sandbox list, which is already the leftmost pane.
+fn nav_left(app: &mut App) {
+    if app.focus == Focus::Detail {
+        if app.tab == DetailTab::all()[0] {
+            app.focus = Focus::SandboxList;
+        } else {
+            app.prev_tab();
+            on_tab_switched(app);
+        }
     }
 }
 

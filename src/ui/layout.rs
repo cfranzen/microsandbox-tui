@@ -96,10 +96,8 @@ pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
     let mut spans: Vec<Span> = vec![
         Span::styled("q", key),
         Span::styled(" quit  ", dim),
-        Span::styled("↑↓/jk", key),
+        Span::styled("↑↓←→/Tab", key),
         Span::styled(" navigate  ", dim),
-        Span::styled("←→/Tab", key),
-        Span::styled(" switch panel  ", dim),
     ];
 
     if app.confirm.is_some() {
