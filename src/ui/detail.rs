@@ -3,7 +3,7 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
@@ -13,13 +13,15 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let theme = app.theme;
     let panel_focused = app.focus == Focus::Detail;
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(theme.border_type(panel_focused))
-        .border_style(theme.border_style(panel_focused));
-
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    // No border around the detail view — it is visually separated from the
+    // sandbox list by that panel's divider scrollbar instead. A one-column
+    // left margin keeps content from touching the divider.
+    let inner = Rect {
+        x: area.x + 1,
+        y: area.y,
+        width: area.width.saturating_sub(1),
+        height: area.height,
+    };
 
     if inner.height < 3 {
         return;
@@ -27,10 +29,12 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Show sandbox name as a title inside the panel
     if let Some(sb) = app.selected_sandbox() {
-        let title = Paragraph::new(Line::from(vec![Span::styled(
-            sb.name.clone(),
-            theme.text_bold(),
-        )]));
+        let name_style = if panel_focused {
+            theme.text_bold()
+        } else {
+            theme.secondary()
+        };
+        let title = Paragraph::new(Line::from(vec![Span::styled(sb.name.clone(), name_style)]));
         let title_area = Rect {
             x: inner.x,
             y: inner.y,

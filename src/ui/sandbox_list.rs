@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
 
@@ -22,9 +22,12 @@ const CARD_TOTAL_HEIGHT: u16 = CARD_INNER_HEIGHT + 2;
 const NEW_CARD_HEIGHT: u16 = 3;
 
 /// Render the sandbox list panel.
+///
+/// The panel has no border of its own — the rightmost column is reserved
+/// for a vertical scrollbar, which doubles as the visual divider between
+/// the sandbox list and the detail view.
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let theme = app.theme;
-    // Outer panel block
     let panel_focused = app.focus == Focus::SandboxList;
     let title = if app.search_active {
         format!(" Sandboxes — search: {}_ ", app.filter)
@@ -33,14 +36,32 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         " Sandboxes ".to_string()
     };
-    let panel_block = Block::default()
-        .title(Span::styled(title, theme.title_accent()))
-        .borders(Borders::ALL)
-        .border_type(theme.border_type(panel_focused))
-        .border_style(theme.border_style(panel_focused));
+    let title_style = if panel_focused {
+        theme.title_accent()
+    } else {
+        theme.muted()
+    };
 
-    let inner = panel_block.inner(area);
-    f.render_widget(panel_block, area);
+    // Reserve the rightmost column of the whole area for the divider
+    // scrollbar; everything else renders in the remaining width.
+    let content_width = area.width.saturating_sub(1);
+    let title_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: content_width,
+        height: area.height.min(1),
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(title, title_style))),
+        title_area,
+    );
+
+    let inner = Rect {
+        x: area.x,
+        y: area.y + 1,
+        width: content_width,
+        height: area.height.saturating_sub(1),
+    };
 
     if inner.height == 0 {
         return;
@@ -56,6 +77,13 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     if total_items == 0 {
         let msg = Line::from(Span::styled("No sandboxes match the filter", theme.muted()));
         f.render_widget(Paragraph::new(msg), inner);
+        let mut scrollbar_state = ScrollbarState::new(0).position(0);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_style(theme.border_style(false))
+            .thumb_style(theme.border_style(panel_focused));
+        f.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
         return;
     }
 
@@ -114,6 +142,17 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
             render_new_sandbox_card(f, &theme, selected, panel_focused, card_area);
         }
     }
+
+    // Divider scrollbar: spans the full height of the panel (title row
+    // included) and separates the sandbox list from the detail view.
+    let mut scrollbar_state =
+        ScrollbarState::new(total_items.saturating_sub(1)).position(first_visible);
+    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(None)
+        .end_symbol(None)
+        .track_style(theme.border_style(false))
+        .thumb_style(theme.border_style(panel_focused));
+    f.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
 }
 
 /// Render a single sandbox card.

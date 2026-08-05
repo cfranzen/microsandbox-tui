@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::Modifier,
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
@@ -12,13 +12,13 @@ use crate::app::App;
 
 /// Returns (list_area, detail_area, header_area, footer_area).
 pub fn split(area: Rect) -> (Rect, Rect, Rect, Rect) {
-    // Vertical split: header(1) / body / footer(1)
+    // Vertical split: bordered header(3) / body / bordered footer(3)
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
+            Constraint::Length(3),
             Constraint::Min(0),
-            Constraint::Length(1),
+            Constraint::Length(3),
         ])
         .split(area);
 
@@ -38,6 +38,15 @@ pub fn split(area: Rect) -> (Rect, Rect, Rect, Rect) {
 /// Render the top header bar.
 pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
     let theme = &app.theme;
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(theme.border_type(false))
+        .border_style(theme.border_style(false))
+        .style(theme.base_style());
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
     let title = Span::styled(" Microsandbox TUI ", theme.badge());
     let subtitle = Span::styled(" Manage microsandbox microVMs", theme.muted());
     let version = Span::styled(" v0.1.0 ", theme.muted());
@@ -46,15 +55,26 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
     let version_line = Line::from(vec![version]).alignment(Alignment::Right);
 
     // Two overlapping paragraphs: left-aligned title, right-aligned version
-    f.render_widget(Paragraph::new(line).style(theme.base_style()), area);
+    f.render_widget(Paragraph::new(line).style(theme.base_style()), inner);
 
     // Overlay the version on the right
-    f.render_widget(Paragraph::new(version_line).style(theme.base_style()), area);
+    f.render_widget(
+        Paragraph::new(version_line).style(theme.base_style()),
+        inner,
+    );
 }
 
 /// Render the bottom footer bar with keybind hints and optional notification.
 pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
     let theme = &app.theme;
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(theme.border_type(false))
+        .border_style(theme.border_style(false))
+        .style(theme.base_style());
+    let inner = block.inner(area);
+    f.render_widget(block, area);
 
     // Show notification if active, otherwise show keybind hints
     if let Some(ref n) = app.notification {
@@ -70,7 +90,7 @@ pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled(n.message.as_str(), style),
             ]))
             .style(theme.base_style()),
-            area,
+            inner,
         );
         return;
     }
@@ -113,6 +133,6 @@ pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
 
     f.render_widget(
         Paragraph::new(Line::from(spans)).style(theme.base_style()),
-        area,
+        inner,
     );
 }
