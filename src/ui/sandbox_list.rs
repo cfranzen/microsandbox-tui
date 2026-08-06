@@ -20,8 +20,8 @@ use crate::theme::Theme;
 use super::util::fmt_bytes;
 
 /// Height of a single sandbox card (lines inside the border/padding):
-/// name, image, workdir, metrics-or-status, separator, actions bar.
-const CARD_INNER_HEIGHT: u16 = 6;
+/// name, separator, image, workdir, metrics-or-status, separator, actions bar.
+const CARD_INNER_HEIGHT: u16 = 7;
 /// Total card height including border.
 const CARD_TOTAL_HEIGHT: u16 = CARD_INNER_HEIGHT + 2;
 /// Height of the "New Sandbox" placeholder.
@@ -241,7 +241,13 @@ fn render_sandbox_card(
         ),
     ]);
 
-    // Line 2: image name, on its own dedicated line.
+    // Line 2: separator, directly under the sandbox name.
+    let top_separator_line = Line::from(Span::styled(
+        "─".repeat(inner.width as usize),
+        theme.muted(),
+    ));
+
+    // Line 3: image name, on its own dedicated line.
     let image_line = Line::from(vec![Span::styled(
         format!(
             "Image: {}",
@@ -250,7 +256,7 @@ fn render_sandbox_card(
         theme.muted(),
     )]);
 
-    // Line 3: working directory.
+    // Line 4: working directory.
     let workdir = sb.workdir.as_deref().unwrap_or("—");
     let workdir_line = Line::from(vec![Span::styled(
         format!(
@@ -260,7 +266,7 @@ fn render_sandbox_card(
         theme.muted(),
     )]);
 
-    // Line 4: metrics (cpu/memory/disk/age) while running; a color-coded
+    // Line 5: metrics (cpu/memory/disk/age) while running; a color-coded
     // status label once the sandbox has stopped or crashed instead, since
     // resource metrics no longer apply.
     let metrics_or_status_line = match sb.status {
@@ -292,8 +298,8 @@ fn render_sandbox_card(
         }
     };
 
-    // Line 5: separator, directly above the actions bar.
-    let separator_line = Line::from(Span::styled(
+    // Line 6: separator, directly above the actions bar.
+    let bottom_separator_line = Line::from(Span::styled(
         "─".repeat(inner.width as usize),
         theme.muted(),
     ));
@@ -302,6 +308,7 @@ fn render_sandbox_card(
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // Name
+            Constraint::Length(1), // Separator
             Constraint::Length(1), // Image
             Constraint::Length(1), // Workdir
             Constraint::Length(1), // Metrics / status
@@ -311,11 +318,12 @@ fn render_sandbox_card(
         .split(inner);
 
     f.render_widget(Paragraph::new(name_line), chunks[0]);
-    f.render_widget(Paragraph::new(image_line), chunks[1]);
-    f.render_widget(Paragraph::new(workdir_line), chunks[2]);
-    f.render_widget(Paragraph::new(metrics_or_status_line), chunks[3]);
-    f.render_widget(Paragraph::new(separator_line), chunks[4]);
-    render_actions_bar(f, *theme, sb.status, chunks[5]);
+    f.render_widget(Paragraph::new(top_separator_line), chunks[1]);
+    f.render_widget(Paragraph::new(image_line), chunks[2]);
+    f.render_widget(Paragraph::new(workdir_line), chunks[3]);
+    f.render_widget(Paragraph::new(metrics_or_status_line), chunks[4]);
+    f.render_widget(Paragraph::new(bottom_separator_line), chunks[5]);
+    render_actions_bar(f, *theme, sb.status, chunks[6]);
 }
 
 /// Render the "New Sandbox" placeholder card.
