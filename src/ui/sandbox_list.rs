@@ -5,7 +5,9 @@ use ratatui::{
     style::{Color, Modifier, Style},
     symbols::line,
     text::{Line, Span},
-    widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{
+        Block, Borders, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+    },
     Frame,
 };
 
@@ -17,44 +19,27 @@ use crate::theme::Theme;
 
 use super::util::fmt_bytes;
 
-/// Height of a single sandbox card's content: name, image, workdir,
-/// metrics-or-status, separator, actions bar.
+/// Height of a single sandbox card (lines inside the border/padding):
+/// name, image, workdir, metrics-or-status, separator, actions bar.
 const CARD_INNER_HEIGHT: u16 = 6;
-/// Total card height, including one blank spacer row that separates it
-/// from the next card (cards have no border of their own).
-const CARD_TOTAL_HEIGHT: u16 = CARD_INNER_HEIGHT + 1;
+/// Total card height including border.
+const CARD_TOTAL_HEIGHT: u16 = CARD_INNER_HEIGHT + 2;
 /// Height of the "New Sandbox" placeholder.
 const NEW_CARD_HEIGHT: u16 = 3;
 
 /// Render the sandbox list panel.
 ///
-/// The panel has no border of its own — the rightmost column is reserved
-/// for a vertical scrollbar, which doubles as the visual divider between
-/// the sandbox list and the detail view. Individual cards are also
-/// borderless; the current selection is shown with a colored gutter bar
-/// instead of a box.
+/// The panel has no title/header row of its own — the rightmost column is
+/// reserved for a vertical scrollbar, which doubles as the visual divider
+/// between the sandbox list and the detail view. The current filter/search
+/// text is shown in the last row instead, directly above the footer.
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let theme = app.theme;
     let panel_focused = app.focus == Focus::SandboxList;
-    let title_style = if panel_focused {
-        theme.title_accent()
-    } else {
-        theme.muted()
-    };
 
     // Reserve the rightmost column of the whole area for the divider
     // scrollbar; everything else renders in the remaining width.
     let content_width = area.width.saturating_sub(1);
-    let title_area = Rect {
-        x: area.x,
-        y: area.y,
-        width: content_width,
-        height: area.height.min(1),
-    };
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(" Sandboxes ", title_style))),
-        title_area,
-    );
 
     // The last row is reserved for the current filter/search indicator,
     // shown directly above the app's footer bar.
@@ -67,9 +52,9 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 
     let sandbox_cards_area = Rect {
         x: area.x,
-        y: area.y + 1,
+        y: area.y,
         width: content_width,
-        height: area.height.saturating_sub(2),
+        height: area.height.saturating_sub(1),
     };
 
     render_filter_indicator(f, app, theme, filter_area);
@@ -216,9 +201,6 @@ fn render_scrollbar(
 }
 
 /// Render a single sandbox card.
-///
-/// Cards have no border. The current selection is indicated by a colored
-/// gutter bar in the leftmost column instead.
 fn render_sandbox_card(
     f: &mut Frame,
     theme: &Theme,
@@ -231,36 +213,14 @@ fn render_sandbox_card(
     let (status_color, status_dot) = status_style(theme, sb.status);
     let highlight = selected && panel_focused;
 
-    if area.width < 4 {
-        return;
-    }
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(theme.border_type(highlight))
+        .border_style(theme.border_style(highlight))
+        .padding(Padding::horizontal(1));
 
-    // Gutter: a colored bar marking the selected card, blended into the
-    // background (invisible) otherwise.
-    let gutter_color = if highlight {
-        theme.accent
-    } else {
-        theme.background
-    };
-    let gutter_area = Rect {
-        x: area.x,
-        y: area.y,
-        width: 1,
-        height: CARD_INNER_HEIGHT.min(area.height),
-    };
-    let gutter_text = "▎\n".repeat(gutter_area.height as usize);
-    f.render_widget(
-        Paragraph::new(gutter_text.trim_end_matches('\n').to_owned())
-            .style(Style::default().fg(gutter_color)),
-        gutter_area,
-    );
-
-    let inner = Rect {
-        x: area.x + 2,
-        y: area.y,
-        width: area.width.saturating_sub(3),
-        height: CARD_INNER_HEIGHT.min(area.height),
-    };
+    let inner = block.inner(area);
+    f.render_widget(block, area);
 
     if inner.height < 1 || inner.width < 2 {
         return;
@@ -367,17 +327,22 @@ fn render_new_sandbox_card(
     area: Rect,
 ) {
     let highlight = selected && panel_focused;
-    let style = if highlight {
-        theme.selected()
-    } else {
-        theme.muted()
-    };
+    let style = theme.border_style(highlight);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .padding(Padding::horizontal(1))
+        .border_type(theme.border_type(highlight))
+        .border_style(style);
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
 
     let label = Line::from(vec![Span::styled(
         "+ New Sandbox",
         style.add_modifier(Modifier::BOLD),
     )]);
-    f.render_widget(Paragraph::new(label).alignment(Alignment::Center), area);
+    f.render_widget(Paragraph::new(label).alignment(Alignment::Center), inner);
 }
 
 //--------------------------------------------------------------------------------------------------
