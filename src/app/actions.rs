@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use crossterm::event::KeyCode;
 
-use crate::sandbox::{SandboxInfo, SandboxStatus as Status};
+use crate::sandbox::{MountSource, SandboxInfo, SandboxStatus as Status, VolumeMountConfig};
 
 use super::{App, AppMessage, DetailTab};
 
@@ -44,6 +44,40 @@ pub enum SandboxAction {
     Stop,
     Terminate,
     Remove,
+}
+
+/// Resolve the raw host workdir path (as typed/picked in the create dialog)
+/// into the guest workdir path plus the bind mount needed to back it, or
+/// `(None, None)` if no workdir was chosen — in which case nothing is
+/// mounted and the sandbox gets no working-directory override.
+pub(crate) fn resolve_workdir_mount(
+    raw_workdir: &str,
+) -> (Option<String>, Option<VolumeMountConfig>) {
+    let raw_workdir = raw_workdir.trim();
+    if raw_workdir.is_empty() {
+        return (None, None);
+    }
+    let guest_path = crate::sandbox::host_path_to_guest_path(raw_workdir);
+    let mount = VolumeMountConfig {
+        guest_path: guest_path.clone(),
+        source: MountSource::Bind(raw_workdir.to_owned()),
+    };
+    (Some(guest_path), Some(mount))
+}
+
+/// Merge the auto-derived workdir mount into the user's explicit mount list,
+/// skipping it if the user already configured a mount for that same guest
+/// path (so an explicit choice always wins over the automatic one).
+pub(crate) fn merge_workdir_mount(
+    mut mounts: Vec<VolumeMountConfig>,
+    workdir_mount: Option<VolumeMountConfig>,
+) -> Vec<VolumeMountConfig> {
+    if let Some(mount) = workdir_mount {
+        if !mounts.iter().any(|m| m.guest_path == mount.guest_path) {
+            mounts.insert(0, mount);
+        }
+    }
+    mounts
 }
 
 pub(crate) fn submit_create_dialog(app: &mut App) {
@@ -95,12 +129,13 @@ pub(crate) fn submit_create_dialog(app: &mut App) {
         Some(hostname)
     };
 
-    let workdir = dlg.workdir.trim().to_owned();
-    let workdir = if workdir.is_empty() {
-        None
-    } else {
-        Some(workdir)
-    };
+    // A workdir chosen via the host directory picker is bind-mounted into
+    // the sandbox at the equivalent guest path (Windows drive-letter paths
+    // are rewritten to their POSIX-style form), so the guest actually sees
+    // that directory at the path it's told is its working directory. If no
+    // workdir was chosen, nothing is mounted and the sandbox gets no
+    // working-directory override.
+    let (workdir, workdir_mount) = resolve_workdir_mount(&dlg.workdir);
 
     let user = dlg.user.trim().to_owned();
     let user = if user.is_empty() { None } else { Some(user) };
@@ -138,7 +173,7 @@ pub(crate) fn submit_create_dialog(app: &mut App) {
 
     let disable_network = dlg.disable_network;
     let network_rules = dlg.network_rules.clone();
-    let mounts = dlg.mounts.clone();
+    let mounts = merge_workdir_mount(dlg.mounts.clone(), workdir_mount);
 
     app.create_dialog = Default::default();
 

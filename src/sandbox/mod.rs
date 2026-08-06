@@ -121,6 +121,40 @@ pub struct VolumeMountConfig {
     pub source: MountSource,
 }
 
+/// Convert a host filesystem path into the corresponding guest path used
+/// when bind-mounting it into a sandbox at "the same" location.
+///
+/// POSIX-style host paths (Linux/macOS) are already valid guest paths and
+/// are returned unchanged (aside from stripping a trailing slash). Windows
+/// drive-letter paths (`D:\foo\bar` or `D:/foo/bar`) have no guest-side
+/// equivalent, so they're rewritten to the POSIX-style form Git-Bash/WSL
+/// conventions use: the drive letter becomes a lowercase top-level
+/// directory, e.g. `D:\foo\bar` -> `/d/foo/bar`.
+pub fn host_path_to_guest_path(host_path: &str) -> String {
+    let normalized = host_path.replace('\\', "/");
+    let bytes = normalized.as_bytes();
+
+    // Windows drive-letter path, e.g. `D:\foo\bar` or `D:/foo/bar`.
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        let drive = (bytes[0] as char).to_ascii_lowercase();
+        let rest = normalized[2..]
+            .trim_start_matches('/')
+            .trim_end_matches('/');
+        return if rest.is_empty() {
+            format!("/{drive}")
+        } else {
+            format!("/{drive}/{rest}")
+        };
+    }
+
+    // Already POSIX-style; strip a trailing slash, but keep a bare root.
+    if normalized.len() > 1 {
+        normalized.trim_end_matches('/').to_string()
+    } else {
+        normalized
+    }
+}
+
 /// Summary of a named volume, as shown in the Volumes view.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VolumeInfo {
@@ -496,6 +530,54 @@ mod tests {
     use super::*;
 
     // ── SandboxInfo ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_host_path_to_guest_path_windows_backslash() {
+        assert_eq!(
+            host_path_to_guest_path(r"d:\my-directory\my-subdir\"),
+            "/d/my-directory/my-subdir"
+        );
+    }
+
+    #[test]
+    fn test_host_path_to_guest_path_windows_forward_slash() {
+        assert_eq!(
+            host_path_to_guest_path("D:/my-directory/my-subdir"),
+            "/d/my-directory/my-subdir"
+        );
+    }
+
+    #[test]
+    fn test_host_path_to_guest_path_windows_uppercase_drive() {
+        assert_eq!(host_path_to_guest_path(r"C:\Users\me"), "/c/Users/me");
+    }
+
+    #[test]
+    fn test_host_path_to_guest_path_windows_drive_root() {
+        assert_eq!(host_path_to_guest_path(r"E:\"), "/e");
+        assert_eq!(host_path_to_guest_path("E:"), "/e");
+    }
+
+    #[test]
+    fn test_host_path_to_guest_path_unix_passthrough() {
+        assert_eq!(
+            host_path_to_guest_path("/home/user/project"),
+            "/home/user/project"
+        );
+    }
+
+    #[test]
+    fn test_host_path_to_guest_path_unix_trailing_slash() {
+        assert_eq!(
+            host_path_to_guest_path("/home/user/project/"),
+            "/home/user/project"
+        );
+    }
+
+    #[test]
+    fn test_host_path_to_guest_path_unix_root() {
+        assert_eq!(host_path_to_guest_path("/"), "/");
+    }
 
     #[test]
     fn test_sandbox_info_construction() {

@@ -1737,3 +1737,72 @@ fn test_dialog_submit_memory_below_min_sets_error() {
     let err = app.create_dialog.error.as_deref().unwrap_or("");
     assert!(err.contains("64"), "error must mention minimum memory");
 }
+
+// ── Workdir auto-mount ──────────────────────────────────────────────────
+
+#[test]
+fn test_resolve_workdir_mount_empty_yields_none() {
+    let (workdir, mount) = actions::resolve_workdir_mount("   ");
+    assert!(workdir.is_none());
+    assert!(mount.is_none());
+}
+
+#[test]
+fn test_resolve_workdir_mount_unix_path_passthrough() {
+    let (workdir, mount) = actions::resolve_workdir_mount("/home/user/project");
+    assert_eq!(workdir.as_deref(), Some("/home/user/project"));
+    let mount = mount.expect("mount should be created");
+    assert_eq!(mount.guest_path, "/home/user/project");
+    assert_eq!(mount.source, MountSource::Bind("/home/user/project".into()));
+}
+
+#[test]
+fn test_resolve_workdir_mount_windows_path_converted() {
+    let (workdir, mount) = actions::resolve_workdir_mount(r"d:\my-directory\my-subdir\");
+    assert_eq!(workdir.as_deref(), Some("/d/my-directory/my-subdir"));
+    let mount = mount.expect("mount should be created");
+    assert_eq!(mount.guest_path, "/d/my-directory/my-subdir");
+    assert_eq!(
+        mount.source,
+        MountSource::Bind(r"d:\my-directory\my-subdir\".into())
+    );
+}
+
+#[test]
+fn test_merge_workdir_mount_no_workdir_leaves_mounts_untouched() {
+    let existing = vec![VolumeMountConfig {
+        guest_path: "/data".into(),
+        source: MountSource::Named("vol1".into()),
+    }];
+    let merged = actions::merge_workdir_mount(existing.clone(), None);
+    assert_eq!(merged, existing);
+}
+
+#[test]
+fn test_merge_workdir_mount_prepends_new_mount() {
+    let existing = vec![VolumeMountConfig {
+        guest_path: "/data".into(),
+        source: MountSource::Named("vol1".into()),
+    }];
+    let workdir_mount = VolumeMountConfig {
+        guest_path: "/home/user/project".into(),
+        source: MountSource::Bind("/home/user/project".into()),
+    };
+    let merged = actions::merge_workdir_mount(existing, Some(workdir_mount.clone()));
+    assert_eq!(merged.len(), 2);
+    assert_eq!(merged[0], workdir_mount);
+}
+
+#[test]
+fn test_merge_workdir_mount_respects_existing_manual_mount_for_same_path() {
+    let manual_mount = VolumeMountConfig {
+        guest_path: "/home/user/project".into(),
+        source: MountSource::Named("custom-vol".into()),
+    };
+    let workdir_mount = VolumeMountConfig {
+        guest_path: "/home/user/project".into(),
+        source: MountSource::Bind("/home/user/project".into()),
+    };
+    let merged = actions::merge_workdir_mount(vec![manual_mount.clone()], Some(workdir_mount));
+    assert_eq!(merged, vec![manual_mount]);
+}

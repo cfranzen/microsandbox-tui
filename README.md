@@ -34,7 +34,10 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 - **Create dialog** — two-tab modal covering all
   [SandboxConfig](https://docs.microsandbox.dev/sdk/rust/sandbox#sandboxconfig) options:
   - **Basic tab**: Name, Image, CPUs, Memory, Port mappings, Environment variables,
-    Working directory (with interactive directory picker), Volume mounts (bind-mount a
+    Working directory (with interactive directory picker — the picked host directory is
+    automatically bind-mounted into the sandbox at the equivalent guest path, so the
+    guest sees it at "the same" location; Windows drive paths like `D:\foo\bar` are
+    translated to `/d/foo/bar`), Volume mounts (bind-mount a
     host directory or attach a named volume — applied only when the sandbox is created;
     the SDK does not support changing mounts on an already-running sandbox)
   - **Advanced tab**: Hostname, User, Shell, Max CPUs, Max Memory, Disable network toggle,

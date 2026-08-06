@@ -257,14 +257,16 @@ fn render_sandbox_card(
     )]);
 
     // Line 4: working directory.
-    let workdir = sb.workdir.as_deref().unwrap_or("—");
-    let workdir_line = Line::from(vec![Span::styled(
-        format!(
-            "Workdir: {}",
-            truncate(workdir, inner.width.saturating_sub(9) as usize)
-        ),
-        theme.muted(),
-    )]);
+    let workdir_line = match sb.workdir.as_deref() {
+        Some(workdir) => Line::from(vec![Span::styled(
+            format!(
+                "Workdir: {}",
+                truncate(workdir, inner.width.saturating_sub(9) as usize)
+            ),
+            theme.muted(),
+        )]),
+        None => Line::from(vec![Span::styled("(no work dir)", theme.muted())]),
+    };
 
     // Line 5: metrics (cpu/memory/disk/age) while running; a color-coded
     // status label once the sandbox has stopped or crashed instead, since
