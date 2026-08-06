@@ -5,9 +5,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     symbols::line,
     text::{Line, Span},
-    widgets::{
-        Block, Borders, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
-    },
+    widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
 
@@ -19,11 +17,12 @@ use crate::theme::Theme;
 
 use super::util::fmt_bytes;
 
-/// Height of a single sandbox card (lines inside the border/padding):
-/// name, separator, image, resources, separator, actions bar.
+/// Height of a single sandbox card's content: name, image, workdir,
+/// metrics-or-status, separator, actions bar.
 const CARD_INNER_HEIGHT: u16 = 6;
-/// Total card height including border.
-const CARD_TOTAL_HEIGHT: u16 = CARD_INNER_HEIGHT + 2;
+/// Total card height, including one blank spacer row that separates it
+/// from the next card (cards have no border of their own).
+const CARD_TOTAL_HEIGHT: u16 = CARD_INNER_HEIGHT + 1;
 /// Height of the "New Sandbox" placeholder.
 const NEW_CARD_HEIGHT: u16 = 3;
 
@@ -31,17 +30,12 @@ const NEW_CARD_HEIGHT: u16 = 3;
 ///
 /// The panel has no border of its own — the rightmost column is reserved
 /// for a vertical scrollbar, which doubles as the visual divider between
-/// the sandbox list and the detail view.
+/// the sandbox list and the detail view. Individual cards are also
+/// borderless; the current selection is shown with a colored gutter bar
+/// instead of a box.
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let theme = app.theme;
     let panel_focused = app.focus == Focus::SandboxList;
-    let title = if app.search_active {
-        format!(" Sandboxes — search: {}_ ", app.filter)
-    } else if !app.filter.trim().is_empty() {
-        format!(" Sandboxes — filter: {} ", app.filter)
-    } else {
-        " Sandboxes ".to_string()
-    };
     let title_style = if panel_focused {
         theme.title_accent()
     } else {
@@ -58,16 +52,27 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         height: area.height.min(1),
     };
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled(title, title_style))),
+        Paragraph::new(Line::from(Span::styled(" Sandboxes ", title_style))),
         title_area,
     );
+
+    // The last row is reserved for the current filter/search indicator,
+    // shown directly above the app's footer bar.
+    let filter_area = Rect {
+        x: area.x,
+        y: area.y + area.height.saturating_sub(1),
+        width: content_width,
+        height: area.height.min(1),
+    };
 
     let sandbox_cards_area = Rect {
         x: area.x,
         y: area.y + 1,
         width: content_width,
-        height: area.height.saturating_sub(1),
+        height: area.height.saturating_sub(2),
     };
+
+    render_filter_indicator(f, app, theme, filter_area);
 
     if sandbox_cards_area.height == 0 {
         return;
@@ -83,8 +88,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     if total_items == 0 {
         let msg = Line::from(Span::styled("No sandboxes match the filter", theme.muted()));
         f.render_widget(Paragraph::new(msg), sandbox_cards_area);
-        let mut scrollbar_state = ScrollbarState::new(0).position(0);
-        render_scrollbar(f, area, theme, panel_focused, &mut scrollbar_state);
+        render_scrollbar(f, area, theme, panel_focused, 0, 0);
         return;
     }
 
@@ -147,11 +151,26 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    // Divider scrollbar: spans the full height of the panel (title row
-    // included) and separates the sandbox list from the detail view.
-    let mut scrollbar_state =
-        ScrollbarState::new(total_items.saturating_sub(1)).position(first_visible);
-    render_scrollbar(f, area, theme, panel_focused, &mut scrollbar_state);
+    // Divider scrollbar: spans the full height of the panel (title and
+    // filter rows included) and separates the sandbox list from the
+    // detail view.
+    render_scrollbar(f, area, theme, panel_focused, total_items, first_visible);
+}
+
+/// Render the current filter/search text at the bottom of the panel,
+/// right above the app's footer bar.
+fn render_filter_indicator(f: &mut Frame, app: &App, theme: Theme, area: Rect) {
+    let text = if app.search_active {
+        format!(" Search: {}_", app.filter)
+    } else if !app.filter.trim().is_empty() {
+        format!(" Filter: {}", app.filter)
+    } else {
+        return;
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(text, theme.muted()))),
+        area,
+    );
 }
 
 fn render_scrollbar(
@@ -159,19 +178,47 @@ fn render_scrollbar(
     area: Rect,
     theme: Theme,
     panel_focused: bool,
-    scrollbar_state: &mut ScrollbarState,
+    total_items: usize,
+    first_visible: usize,
 ) {
-    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-        .begin_symbol(None)
-        .thumb_symbol(line::VERTICAL)
-        .track_symbol(Some(line::VERTICAL))
-        .end_symbol(None)
-        .track_style(theme.border_style(false))
-        .thumb_style(theme.border_style(panel_focused));
-    f.render_stateful_widget(scrollbar, area, scrollbar_state);
+    // Always draw a plain divider line first: ratatui's `Scrollbar` widget
+    // renders nothing at all when `content_length == 0` (0 or 1 items), but
+    // this column doubles as the visual divider between the sandbox list
+    // and the detail view, so it must stay visible regardless of scroll
+    // state.
+    let divider_area = Rect {
+        x: area.x + area.width.saturating_sub(1),
+        y: area.y,
+        width: 1,
+        height: area.height,
+    };
+    let divider_text = format!("{}\n", line::VERTICAL).repeat(area.height as usize);
+    f.render_widget(
+        Paragraph::new(divider_text.trim_end_matches('\n').to_owned())
+            .style(theme.border_style(false)),
+        divider_area,
+    );
+
+    // Overlay the scroll-position thumb only when there is more than one
+    // item to distinguish a scrollable list from a static divider.
+    if total_items > 1 {
+        let mut scrollbar_state =
+            ScrollbarState::new(total_items.saturating_sub(1)).position(first_visible);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .thumb_symbol(line::VERTICAL)
+            .track_symbol(Some(line::VERTICAL))
+            .end_symbol(None)
+            .track_style(theme.border_style(false))
+            .thumb_style(theme.border_style(panel_focused));
+        f.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    }
 }
 
 /// Render a single sandbox card.
+///
+/// Cards have no border. The current selection is indicated by a colored
+/// gutter bar in the leftmost column instead.
 fn render_sandbox_card(
     f: &mut Frame,
     theme: &Theme,
@@ -182,25 +229,44 @@ fn render_sandbox_card(
     area: Rect,
 ) {
     let (status_color, status_dot) = status_style(theme, sb.status);
-
     let highlight = selected && panel_focused;
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(theme.border_type(highlight))
-        .border_style(theme.border_style(highlight))
-        .padding(Padding::horizontal(1))
-        .title(Span::styled(" Sandbox ", theme.title_accent()))
-        .title_alignment(Alignment::Right);
+    if area.width < 4 {
+        return;
+    }
 
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    // Gutter: a colored bar marking the selected card, blended into the
+    // background (invisible) otherwise.
+    let gutter_color = if highlight {
+        theme.accent
+    } else {
+        theme.background
+    };
+    let gutter_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: 1,
+        height: CARD_INNER_HEIGHT.min(area.height),
+    };
+    let gutter_text = "▎\n".repeat(gutter_area.height as usize);
+    f.render_widget(
+        Paragraph::new(gutter_text.trim_end_matches('\n').to_owned())
+            .style(Style::default().fg(gutter_color)),
+        gutter_area,
+    );
+
+    let inner = Rect {
+        x: area.x + 2,
+        y: area.y,
+        width: area.width.saturating_sub(3),
+        height: CARD_INNER_HEIGHT.min(area.height),
+    };
 
     if inner.height < 1 || inner.width < 2 {
         return;
     }
 
-    // Line 1: status dot + name (+ selected checkmark)
+    // Line 1: status dot + name.
     let name_style = if selected {
         theme.text_bold()
     } else {
@@ -210,14 +276,9 @@ fn render_sandbox_card(
         Span::styled(status_dot, Style::default().fg(status_color)),
         Span::raw(" "),
         Span::styled(
-            truncate(&sb.name, inner.width.saturating_sub(3) as usize),
+            truncate(&sb.name, inner.width.saturating_sub(2) as usize),
             name_style,
         ),
-        if selected {
-            Span::styled(" ✓", theme.success())
-        } else {
-            Span::raw("")
-        },
     ]);
 
     // Line 2: image name, on its own dedicated line.
@@ -229,44 +290,71 @@ fn render_sandbox_card(
         theme.muted(),
     )]);
 
-    // Line 3: cpu · memory · disk · age
-    let age = sb
-        .created_at
-        .map(|t| {
-            let secs = (chrono::Utc::now() - t).num_seconds().max(0) as u64;
-            humantime::format_duration(std::time::Duration::from_secs(secs)).to_string()
-        })
-        .unwrap_or_else(|| "—".into());
-    let disk = disk_used_bytes.map(fmt_bytes).unwrap_or_else(|| "—".into());
-
-    let resource_line = Line::from(vec![Span::styled(
+    // Line 3: working directory.
+    let workdir = sb.workdir.as_deref().unwrap_or("—");
+    let workdir_line = Line::from(vec![Span::styled(
         format!(
-            "{}cpus · {}MiB · {} disk · {}",
-            sb.cpus,
-            sb.memory_mib,
-            disk,
-            truncate(&age, 10)
+            "Workdir: {}",
+            truncate(workdir, inner.width.saturating_sub(9) as usize)
         ),
         theme.muted(),
     )]);
 
+    // Line 4: metrics (cpu/memory/disk/age) while running; a color-coded
+    // status label once the sandbox has stopped or crashed instead, since
+    // resource metrics no longer apply.
+    let metrics_or_status_line = match sb.status {
+        SandboxStatus::Stopped | SandboxStatus::Crashed => Line::from(vec![Span::styled(
+            format!("{} {}", status_dot, status_label(sb.status)),
+            Style::default()
+                .fg(status_color)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        _ => {
+            let age = sb
+                .created_at
+                .map(|t| {
+                    let secs = (chrono::Utc::now() - t).num_seconds().max(0) as u64;
+                    humantime::format_duration(std::time::Duration::from_secs(secs)).to_string()
+                })
+                .unwrap_or_else(|| "—".into());
+            let disk = disk_used_bytes.map(fmt_bytes).unwrap_or_else(|| "—".into());
+            Line::from(vec![Span::styled(
+                format!(
+                    "{}cpus · {}MiB · {} disk · {}",
+                    sb.cpus,
+                    sb.memory_mib,
+                    disk,
+                    truncate(&age, 10)
+                ),
+                theme.muted(),
+            )])
+        }
+    };
+
+    // Line 5: separator, directly above the actions bar.
+    let separator_line = Line::from(Span::styled(
+        "─".repeat(inner.width as usize),
+        theme.muted(),
+    ));
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // Title
-            Constraint::Length(1), // Separator
+            Constraint::Length(1), // Name
             Constraint::Length(1), // Image
-            Constraint::Length(1), // Metrics
+            Constraint::Length(1), // Workdir
+            Constraint::Length(1), // Metrics / status
             Constraint::Length(1), // Separator
             Constraint::Length(1), // Actions bar
         ])
         .split(inner);
 
     f.render_widget(Paragraph::new(name_line), chunks[0]);
-    f.render_widget(Paragraph::new(Line::from(Span::styled("─".repeat(inner.width as usize), theme.muted()))), chunks[1]);
-    f.render_widget(Paragraph::new(image_line), chunks[2]);
-    f.render_widget(Paragraph::new(resource_line), chunks[3]);
-    f.render_widget(Paragraph::new(Line::from(Span::styled("─".repeat(inner.width as usize), theme.muted()))), chunks[4]);
+    f.render_widget(Paragraph::new(image_line), chunks[1]);
+    f.render_widget(Paragraph::new(workdir_line), chunks[2]);
+    f.render_widget(Paragraph::new(metrics_or_status_line), chunks[3]);
+    f.render_widget(Paragraph::new(separator_line), chunks[4]);
     render_actions_bar(f, *theme, sb.status, chunks[5]);
 }
 
@@ -279,22 +367,17 @@ fn render_new_sandbox_card(
     area: Rect,
 ) {
     let highlight = selected && panel_focused;
-    let style = theme.border_style(highlight);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .padding(Padding::horizontal(1))
-        .border_type(theme.border_type(highlight))
-        .border_style(style);
-
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let style = if highlight {
+        theme.selected()
+    } else {
+        theme.muted()
+    };
 
     let label = Line::from(vec![Span::styled(
         "+ New Sandbox",
         style.add_modifier(Modifier::BOLD),
     )]);
-    f.render_widget(Paragraph::new(label).alignment(Alignment::Center), inner);
+    f.render_widget(Paragraph::new(label).alignment(Alignment::Center), area);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -311,12 +394,8 @@ fn action_items(theme: &Theme, status: SandboxStatus) -> Vec<(&'static str, &'st
             ("t", "erm", theme.danger),
             ("d", "el", theme.danger),
         ],
-        SandboxStatus::Stopped => vec![
-            ("s", "tart", theme.success),
-            ("d", "el", theme.danger)],
-        _ => vec![
-            ("d", "el", theme.danger)
-        ],
+        SandboxStatus::Stopped => vec![("s", "tart", theme.success), ("d", "el", theme.danger)],
+        _ => vec![("d", "el", theme.danger)],
     }
 }
 
@@ -342,7 +421,7 @@ fn render_actions_bar(f: &mut Frame, theme: Theme, status: SandboxStatus, area: 
         let line = Line::from(vec![
             Span::styled(
                 *key,
-                Style::default().fg(*color).add_modifier(Modifier::BOLD).add_modifier(Modifier::UNDERLINED),
+                Style::default().fg(*color).add_modifier(Modifier::BOLD),
             ),
             Span::styled(*rest, Style::default().fg(*color)),
         ]);
@@ -358,6 +437,20 @@ fn status_style(theme: &Theme, status: SandboxStatus) -> (ratatui::style::Color,
         _ => "○",
     };
     (theme.status_color(status), glyph)
+}
+
+/// Human-readable label for a sandbox status, used when the status
+/// replaces the metrics line (stopped/crashed cards).
+fn status_label(status: SandboxStatus) -> &'static str {
+    match status {
+        SandboxStatus::Created => "Created",
+        SandboxStatus::Starting => "Starting",
+        SandboxStatus::Running => "Running",
+        SandboxStatus::Draining => "Draining",
+        SandboxStatus::Paused => "Paused",
+        SandboxStatus::Stopped => "Stopped",
+        SandboxStatus::Crashed => "Crashed",
+    }
 }
 
 fn truncate(s: &str, max: usize) -> String {

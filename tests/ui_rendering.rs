@@ -30,6 +30,7 @@ fn make_sandbox(name: &str, status: SandboxStatus) -> SandboxInfo {
         memory_mib: 512,
         created_at: None,
         updated_at: None,
+        workdir: None,
     }
 }
 

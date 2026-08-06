@@ -25,6 +25,8 @@ pub struct SandboxInfo {
     pub memory_mib: u32,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
+    /// The sandbox's working directory, when known.
+    pub workdir: Option<String>,
 }
 
 /// A point-in-time metrics snapshot for a sandbox.
@@ -161,7 +163,7 @@ pub async fn list_sandboxes() -> Result<Vec<SandboxInfo>> {
     let handles = Sandbox::list().await?;
     let mut infos = Vec::with_capacity(handles.len());
     for h in handles {
-        let (image, cpus, memory_mib) = if let Ok(cfg) = h.config() {
+        let (image, cpus, memory_mib, workdir) = if let Ok(cfg) = h.config() {
             let image = cfg
                 .spec
                 .image
@@ -172,9 +174,10 @@ pub async fn list_sandboxes() -> Result<Vec<SandboxInfo>> {
                 image,
                 cfg.spec.resources.cpus,
                 cfg.spec.resources.memory_mib,
+                cfg.spec.runtime.workdir.clone(),
             )
         } else {
-            ("—".into(), 1, 512)
+            ("—".into(), 1, 512, None)
         };
 
         infos.push(SandboxInfo {
@@ -185,6 +188,7 @@ pub async fn list_sandboxes() -> Result<Vec<SandboxInfo>> {
             memory_mib,
             created_at: h.created_at(),
             updated_at: h.updated_at(),
+            workdir,
         });
     }
     Ok(infos)
@@ -503,6 +507,7 @@ mod tests {
             memory_mib: 1024,
             created_at: None,
             updated_at: None,
+            workdir: None,
         };
         assert_eq!(info.name, "mybox");
         assert_eq!(info.status, SandboxStatus::Running);
@@ -521,6 +526,7 @@ mod tests {
             memory_mib: 512,
             created_at: None,
             updated_at: None,
+            workdir: None,
         };
         let cloned = info.clone();
         assert_eq!(cloned.name, info.name);
