@@ -182,14 +182,14 @@ SDK (independent of any particular sandbox).
 git clone https://github.com/cfranzen/microsandbox-tui
 cd microsandbox-tui
 cargo build --release
-./target/release/microsandbox-tui
+./target/release/msbui
 ```
 
 ## Usage
 
 ```bash
 # Launch the TUI
-microsandbox-tui
+msbui
 ```
 
 The TUI connects to the local microsandbox runtime automatically (no server process needed).
