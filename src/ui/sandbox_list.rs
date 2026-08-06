@@ -373,9 +373,9 @@ fn action_items(theme: &Theme, status: SandboxStatus) -> Vec<(&'static str, &'st
 }
 
 /// Render the action shortcuts distributed evenly across the full card
-/// width. Each shortcut's key letter is bold, underlined, and colored by
-/// the action's meaning (see [`action_items`]) so it stands out clearly
-/// against the muted description text that follows it.
+/// width. Each shortcut's key letter is bold and colored by the action's
+/// meaning (see [`action_items`]) so it stands out clearly against the
+/// muted description text that follows it.
 fn render_actions_bar(f: &mut Frame, theme: Theme, status: SandboxStatus, area: Rect) {
     let items = action_items(&theme, status);
     if items.is_empty() {
@@ -395,9 +395,7 @@ fn render_actions_bar(f: &mut Frame, theme: Theme, status: SandboxStatus, area: 
         let line = Line::from(vec![
             Span::styled(
                 *key,
-                Style::default()
-                    .fg(*color)
-                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                Style::default().fg(*color).add_modifier(Modifier::BOLD),
             ),
             Span::styled(*rest, theme.muted()),
         ]);
