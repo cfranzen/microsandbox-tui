@@ -20,8 +20,8 @@ use crate::theme::Theme;
 use super::util::fmt_bytes;
 
 /// Height of a single sandbox card (lines inside the border/padding):
-/// name, image, resources, separator, actions bar.
-const CARD_INNER_HEIGHT: u16 = 5;
+/// name, separator, image, resources, separator, actions bar.
+const CARD_INNER_HEIGHT: u16 = 6;
 /// Total card height including border.
 const CARD_TOTAL_HEIGHT: u16 = CARD_INNER_HEIGHT + 2;
 /// Height of the "New Sandbox" placeholder.
@@ -250,30 +250,24 @@ fn render_sandbox_card(
         theme.muted(),
     )]);
 
-    // Line 4: separator, directly above the actions bar.
-    let separator_line = Line::from(Span::styled(
-        "─".repeat(inner.width as usize),
-        theme.muted(),
-    ));
-
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
+            Constraint::Length(1), // Title
+            Constraint::Length(1), // Separator
+            Constraint::Length(1), // Image
+            Constraint::Length(1), // Metrics
+            Constraint::Length(1), // Separator
+            Constraint::Length(1), // Actions bar
         ])
         .split(inner);
 
     f.render_widget(Paragraph::new(name_line), chunks[0]);
-    f.render_widget(Paragraph::new(image_line), chunks[1]);
-    f.render_widget(Paragraph::new(resource_line), chunks[2]);
-    f.render_widget(Paragraph::new(separator_line), chunks[3]);
-    // Line 5: actions bar — always shown, evenly distributed across the
-    // full card width, color-coded by the action's meaning.
-    render_actions_bar(f, *theme, sb.status, chunks[4]);
+    f.render_widget(Paragraph::new(Line::from(Span::styled("─".repeat(inner.width as usize), theme.muted()))), chunks[1]);
+    f.render_widget(Paragraph::new(image_line), chunks[2]);
+    f.render_widget(Paragraph::new(resource_line), chunks[3]);
+    f.render_widget(Paragraph::new(Line::from(Span::styled("─".repeat(inner.width as usize), theme.muted()))), chunks[4]);
+    render_actions_bar(f, *theme, sb.status, chunks[5]);
 }
 
 /// Render the "New Sandbox" placeholder card.
@@ -317,8 +311,12 @@ fn action_items(theme: &Theme, status: SandboxStatus) -> Vec<(&'static str, &'st
             ("t", "erm", theme.danger),
             ("d", "el", theme.danger),
         ],
-        SandboxStatus::Stopped => vec![("s", "tart", theme.success), ("d", "el", theme.danger)],
-        _ => vec![("d", "el", theme.danger)],
+        SandboxStatus::Stopped => vec![
+            ("s", "tart", theme.success),
+            ("d", "el", theme.danger)],
+        _ => vec![
+            ("d", "el", theme.danger)
+        ],
     }
 }
 
@@ -344,7 +342,7 @@ fn render_actions_bar(f: &mut Frame, theme: Theme, status: SandboxStatus, area: 
         let line = Line::from(vec![
             Span::styled(
                 *key,
-                Style::default().fg(*color).add_modifier(Modifier::BOLD),
+                Style::default().fg(*color).add_modifier(Modifier::BOLD).add_modifier(Modifier::UNDERLINED),
             ),
             Span::styled(*rest, Style::default().fg(*color)),
         ]);
