@@ -120,7 +120,7 @@ impl Theme {
             danger: Color::Red,
             danger_text: Color::LightRed,
             info: Color::Blue,
-            border_focused_type: BorderType::Thick,
+            border_focused_type: BorderType::Rounded,
             border_unfocused_type: BorderType::Rounded,
         }
     }
@@ -144,7 +144,7 @@ impl Theme {
             danger: Color::Rgb(178, 34, 34),
             danger_text: Color::Rgb(200, 40, 40),
             info: Color::Blue,
-            border_focused_type: BorderType::Thick,
+            border_focused_type: BorderType::Rounded,
             border_unfocused_type: BorderType::Rounded,
         }
     }

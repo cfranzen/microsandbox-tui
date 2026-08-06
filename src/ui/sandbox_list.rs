@@ -2,24 +2,25 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    style::{Style},
+    symbols::line,
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
 
-use microsandbox::sandbox::SandboxStatus;
-
 use crate::app::{App, Focus};
 use crate::sandbox::SandboxInfo;
 use crate::theme::Theme;
+use microsandbox::sandbox::SandboxStatus;
+use ratatui::widgets::Padding;
 
 /// Height of a single sandbox card (lines inside the border).
-const CARD_INNER_HEIGHT: u16 = 4;
+const CARD_INNER_HEIGHT: u16 = 7;
 /// Total card height including border.
 const CARD_TOTAL_HEIGHT: u16 = CARD_INNER_HEIGHT + 2;
 /// Height of the "New Sandbox" placeholder.
-const NEW_CARD_HEIGHT: u16 = 3;
+const NEW_CARD_HEIGHT: u16 = CARD_TOTAL_HEIGHT;
 
 /// Render the sandbox list panel.
 ///
@@ -56,14 +57,14 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         title_area,
     );
 
-    let inner = Rect {
+    let sandbox_cards_area = Rect {
         x: area.x,
         y: area.y + 1,
         width: content_width,
         height: area.height.saturating_sub(1),
     };
 
-    if inner.height == 0 {
+    if sandbox_cards_area.height == 0 {
         return;
     }
 
@@ -76,14 +77,9 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 
     if total_items == 0 {
         let msg = Line::from(Span::styled("No sandboxes match the filter", theme.muted()));
-        f.render_widget(Paragraph::new(msg), inner);
+        f.render_widget(Paragraph::new(msg), sandbox_cards_area);
         let mut scrollbar_state = ScrollbarState::new(0).position(0);
-        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .begin_symbol(None)
-            .end_symbol(None)
-            .track_style(theme.border_style(false))
-            .thumb_style(theme.border_style(panel_focused));
-        f.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+        render_scrollbar(f, area, theme, panel_focused, &mut scrollbar_state);
         return;
     }
 
@@ -95,19 +91,19 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     };
 
     // Simple scroll: figure out the first visible item based on selected
-    let visible_height = inner.height;
+    let visible_height = sandbox_cards_area.height;
     let first_visible = compute_first_visible(selected_pos, total_items, visible_height);
 
-    let mut y = inner.y;
-    let x = inner.x;
-    let w = inner.width;
+    let mut y = sandbox_cards_area.y;
+    let x = sandbox_cards_area.x;
+    let w = sandbox_cards_area.width;
 
     for item_idx in first_visible..total_items {
         let selected = item_idx == selected_pos;
 
         if item_idx < visible.len() {
             // Regular sandbox card
-            if y + CARD_TOTAL_HEIGHT > inner.y + visible_height {
+            if y + CARD_TOTAL_HEIGHT > sandbox_cards_area.y + visible_height {
                 break;
             }
             let abs_idx = visible[item_idx];
@@ -129,7 +125,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
             y += CARD_TOTAL_HEIGHT;
         } else {
             // "New Sandbox" entry
-            if y + NEW_CARD_HEIGHT > inner.y + visible_height {
+            if y + NEW_CARD_HEIGHT > sandbox_cards_area.y + visible_height {
                 break;
             }
             let card_area = Rect {
@@ -147,8 +143,14 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     // included) and separates the sandbox list from the detail view.
     let mut scrollbar_state =
         ScrollbarState::new(total_items.saturating_sub(1)).position(first_visible);
+    render_scrollbar(f, area, theme, panel_focused, &mut scrollbar_state);
+}
+
+fn render_scrollbar(f: &mut Frame, area: Rect, theme: Theme, panel_focused: bool, mut scrollbar_state: &mut ScrollbarState) {
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
         .begin_symbol(None)
+        .thumb_symbol(line::VERTICAL)
+        .track_symbol(Some(line::VERTICAL))
         .end_symbol(None)
         .track_style(theme.border_style(false))
         .thumb_style(theme.border_style(panel_focused));
@@ -195,18 +197,23 @@ fn render_sandbox_card(
             truncate(&sb.name, inner.width.saturating_sub(4) as usize),
             name_style,
         ),
-        if selected {
-            Span::styled(" ✓", theme.success())
-        } else {
-            Span::raw("")
-        },
+        Span::styled(
+            format!(
+                "  {}",
+                truncate(&sb.image, inner.width.saturating_sub(3) as usize)
+            ),
+            theme.muted(),
+        ),
     ]);
 
     // Line 2: image name
-    let image_line = Line::from(vec![Span::styled(
+    let workdir_line = Line::from(vec![Span::styled(
         format!(
             "  {}",
-            truncate(&sb.image, inner.width.saturating_sub(3) as usize)
+            truncate(
+                "TODO: Work dir missing here",
+                inner.width.saturating_sub(3) as usize
+            )
         ),
         theme.muted(),
     )]);
@@ -254,7 +261,7 @@ fn render_sandbox_card(
         .split(inner);
 
     f.render_widget(Paragraph::new(name_line), chunks[0]);
-    f.render_widget(Paragraph::new(image_line), chunks[1]);
+    f.render_widget(Paragraph::new(workdir_line), chunks[1]);
     f.render_widget(Paragraph::new(resource_line), chunks[2]);
     f.render_widget(Paragraph::new(action_line), chunks[3]);
 }
@@ -272,16 +279,14 @@ fn render_new_sandbox_card(
 
     let block = Block::default()
         .borders(Borders::ALL)
+        .padding(Padding::vertical(3))
         .border_type(theme.border_type(highlight))
         .border_style(style);
 
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let label = Line::from(vec![Span::styled(
-        "+ New Sandbox",
-        style.add_modifier(Modifier::BOLD),
-    )]);
+    let label = Line::from(vec![Span::styled("+ New Sandbox", theme.text)]);
     f.render_widget(
         Paragraph::new(label).alignment(ratatui::layout::Alignment::Center),
         inner,

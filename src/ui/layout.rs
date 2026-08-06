@@ -47,8 +47,8 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let title = Span::styled(" Microsandbox TUI ", theme.badge());
-    let subtitle = Span::styled(" Manage microsandbox microVMs", theme.muted());
+    let title = Span::styled(" MicroSandbox UI ", theme.badge());
+    let subtitle = Span::styled(" -  Manage all your sandboxes in one place", theme.muted());
     let version = Span::styled(" v0.1.0 ", theme.muted());
 
     let line = Line::from(vec![title, subtitle]);
