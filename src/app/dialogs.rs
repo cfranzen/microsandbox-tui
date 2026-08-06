@@ -467,3 +467,33 @@ impl VolumesView {
         }
     }
 }
+
+/// The command line prefilled in the "Exec" dialog: opens a plain shell in
+/// the sandbox by default.
+pub const DEFAULT_EXEC_COMMAND: &str = "sh";
+
+/// State of the "Exec" dialog: prompts for a command line to run inside a
+/// running sandbox, then opens a new terminal window on the host that runs
+/// it there via the `msb` CLI's `exec` subcommand.
+#[derive(Debug, Clone, Default)]
+pub struct ExecDialog {
+    pub visible: bool,
+    /// Name of the sandbox the command will be executed in.
+    pub sandbox_name: String,
+    /// Command line typed by the user, defaults to [`DEFAULT_EXEC_COMMAND`].
+    pub command: String,
+    pub error: Option<String>,
+}
+
+impl ExecDialog {
+    /// Open the dialog for the given sandbox, prefilled with the default
+    /// shell command.
+    pub fn open(sandbox_name: impl Into<String>) -> Self {
+        Self {
+            visible: true,
+            sandbox_name: sandbox_name.into(),
+            command: DEFAULT_EXEC_COMMAND.to_owned(),
+            error: None,
+        }
+    }
+}

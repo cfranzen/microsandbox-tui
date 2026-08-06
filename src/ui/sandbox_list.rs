@@ -358,12 +358,13 @@ fn render_new_sandbox_card(
 //--------------------------------------------------------------------------------------------------
 
 /// The action shortcuts available for a sandbox in a given status, each
-/// with its own semantic color: start = success, stop = warning,
-/// terminate/delete = danger.
+/// with its own semantic color: start = success, stop = warning, exec =
+/// info, terminate/delete = danger.
 fn action_items(theme: &Theme, status: SandboxStatus) -> Vec<(&'static str, &'static str, Color)> {
     match status {
         SandboxStatus::Running => vec![
             ("s", "top", theme.warning),
+            ("e", "xec", theme.info),
             ("t", "erm", theme.danger),
             ("d", "el", theme.danger),
         ],

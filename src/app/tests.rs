@@ -1259,6 +1259,78 @@ async fn test_d_remove_error_when_sandbox_running() {
     assert!(app.confirm.is_none());
 }
 
+#[tokio::test]
+async fn test_e_exec_opens_dialog_prefilled_with_default_shell_when_running() {
+    let mut app = make_app();
+    app.sandboxes.push(make_sandbox("box1", Status::Running));
+    handle_event(&mut app, key_press(KeyCode::Char('e')));
+    assert!(app.exec_dialog.visible);
+    assert_eq!(app.exec_dialog.sandbox_name, "box1");
+    assert_eq!(
+        app.exec_dialog.command,
+        crate::app::dialogs::DEFAULT_EXEC_COMMAND
+    );
+}
+
+#[tokio::test]
+async fn test_e_exec_error_when_sandbox_not_running() {
+    let mut app = make_app();
+    app.sandboxes.push(make_sandbox("box1", Status::Stopped));
+    handle_event(&mut app, key_press(KeyCode::Char('e')));
+    assert!(!app.exec_dialog.visible);
+    assert!(app.notification.as_ref().unwrap().is_error);
+}
+
+#[tokio::test]
+async fn test_exec_dialog_esc_cancels_without_error() {
+    let mut app = make_app();
+    app.sandboxes.push(make_sandbox("box1", Status::Running));
+    handle_event(&mut app, key_press(KeyCode::Char('e')));
+    assert!(app.exec_dialog.visible);
+    handle_event(&mut app, key_press(KeyCode::Esc));
+    assert!(!app.exec_dialog.visible);
+}
+
+#[tokio::test]
+async fn test_exec_dialog_typing_edits_command() {
+    let mut app = make_app();
+    app.sandboxes.push(make_sandbox("box1", Status::Running));
+    handle_event(&mut app, key_press(KeyCode::Char('e')));
+    handle_event(&mut app, key_press(KeyCode::Backspace));
+    handle_event(&mut app, key_press(KeyCode::Backspace));
+    handle_event(&mut app, key_press(KeyCode::Char('b')));
+    handle_event(&mut app, key_press(KeyCode::Char('a')));
+    handle_event(&mut app, key_press(KeyCode::Char('s')));
+    handle_event(&mut app, key_press(KeyCode::Char('h')));
+    assert_eq!(app.exec_dialog.command, "bash");
+}
+
+#[tokio::test]
+async fn test_exec_dialog_enter_rejects_empty_command() {
+    let mut app = make_app();
+    app.sandboxes.push(make_sandbox("box1", Status::Running));
+    handle_event(&mut app, key_press(KeyCode::Char('e')));
+    for _ in 0..app.exec_dialog.command.len() {
+        handle_event(&mut app, key_press(KeyCode::Backspace));
+    }
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    assert!(app.exec_dialog.visible);
+    assert!(app.exec_dialog.error.is_some());
+}
+
+#[tokio::test]
+async fn test_exec_dialog_enter_with_command_closes_dialog() {
+    let mut app = make_app();
+    app.sandboxes.push(make_sandbox("box1", Status::Running));
+    handle_event(&mut app, key_press(KeyCode::Char('e')));
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    assert!(!app.exec_dialog.visible);
+    // Whether launching a real terminal succeeds depends on the host
+    // environment, but the dialog must close and always surface *some*
+    // notification either way.
+    assert!(app.notification.is_some());
+}
+
 // ── handle_event: search/filter ──────────────────────────────────────────
 
 #[test]

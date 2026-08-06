@@ -16,12 +16,12 @@ use crate::sandbox::{
 };
 
 use super::actions::{
-    action_remove, action_terminate, action_toggle_start_stop, handle_confirm_key,
+    action_exec, action_remove, action_terminate, action_toggle_start_stop, handle_confirm_key,
     handle_search_key, nav_fs_up, on_sandbox_selected, on_tab_switched, request_volume_refresh,
     scroll_down, scroll_up, submit_create_dialog, PendingAction,
 };
 use super::dialogs::{
-    CreateDialog, DialogTab, DirPicker, EnvVarsDialog, MountKindChoice, MountsDialog,
+    CreateDialog, DialogTab, DirPicker, EnvVarsDialog, ExecDialog, MountKindChoice, MountsDialog,
     NetworkRulesDialog, PortsDialog, SubDialogMode, VolumesView, DRIVES_ENTRY, PICKER_VISIBLE_ROWS,
 };
 use super::{App, AppMessage, DetailTab, Focus};
@@ -83,6 +83,12 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
         return;
     }
 
+    // The "Exec" dialog is a separate top-level modal.
+    if app.exec_dialog.visible {
+        handle_exec_dialog_key(app, key.code);
+        return;
+    }
+
     // Search/filter input steals key input while active.
     if app.search_active {
         handle_search_key(app, key.code);
@@ -135,6 +141,9 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
         }
         KeyCode::Char('t') if app.focus == Focus::SandboxList => {
             action_terminate(app);
+        }
+        KeyCode::Char('e') if app.focus == Focus::SandboxList => {
+            action_exec(app);
         }
         KeyCode::Char('d') if app.focus == Focus::SandboxList => {
             action_remove(app);
@@ -204,6 +213,7 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     if app.confirm.is_some()
         || app.create_dialog.visible
         || app.volumes_view.visible
+        || app.exec_dialog.visible
         || app.search_active
     {
         return;
@@ -926,5 +936,36 @@ fn handle_volumes_view_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
             }
             _ => {}
         },
+    }
+}
+
+/// Handle a keypress while the "Exec" dialog is open.
+fn handle_exec_dialog_key(app: &mut App, code: KeyCode) {
+    match code {
+        KeyCode::Esc => {
+            app.exec_dialog = ExecDialog::default();
+        }
+        KeyCode::Backspace => {
+            app.exec_dialog.command.pop();
+            app.exec_dialog.error = None;
+        }
+        KeyCode::Enter => {
+            let command = app.exec_dialog.command.trim().to_owned();
+            if command.is_empty() {
+                app.exec_dialog.error = Some("Command cannot be empty".into());
+                return;
+            }
+            let name = app.exec_dialog.sandbox_name.clone();
+            app.exec_dialog = ExecDialog::default();
+            match crate::terminal_launcher::open_exec_terminal(&name, &command) {
+                Ok(()) => app.notify(format!("Running '{command}' in '{name}'…"), false),
+                Err(e) => app.notify(format!("Failed to open terminal: {e}"), true),
+            }
+        }
+        KeyCode::Char(c) => {
+            app.exec_dialog.command.push(c);
+            app.exec_dialog.error = None;
+        }
+        _ => {}
     }
 }

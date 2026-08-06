@@ -341,6 +341,17 @@ pub(crate) fn action_remove(app: &mut App) {
     }
 }
 
+/// Open the "Exec" dialog for the selected sandbox, if it's running.
+pub(crate) fn action_exec(app: &mut App) {
+    if let Some(sb) = app.selected_sandbox().cloned() {
+        if sb.status == Status::Running {
+            app.exec_dialog = super::ExecDialog::open(sb.name);
+        } else {
+            app.notify("Sandbox is not running", true);
+        }
+    }
+}
+
 /// Handle a keypress while the "Are you sure?" confirmation dialog is open.
 pub(crate) fn handle_confirm_key(app: &mut App, code: KeyCode) {
     match code {

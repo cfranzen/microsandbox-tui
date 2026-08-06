@@ -3,6 +3,7 @@
 mod confirm_dialog;
 mod create_dialog;
 mod detail;
+mod exec_dialog;
 mod filesystem;
 mod info;
 mod layout;
@@ -40,6 +41,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     }
     if app.volumes_view.visible {
         volumes::render(f, app, f.area());
+    }
+    if app.exec_dialog.visible {
+        exec_dialog::render(f, app, f.area());
     }
     if app.confirm.is_some() {
         confirm_dialog::render(f, app, f.area());

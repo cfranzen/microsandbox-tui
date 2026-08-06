@@ -12,6 +12,9 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
   the keyboard; a single `s` key toggles start/stop depending on the sandbox's current
   state, and destructive actions (stop, terminate, remove) show an "Are you sure?"
   confirmation dialog before running
+- **Exec** — press `e` on a running sandbox to run a command inside it; opens a new
+  terminal window on the host running `msb exec <name> -- sh -c <command>`, defaulting
+  to a plain shell
 - **Search/filter** — press `/` to search sandboxes live by substring on name, or use
   `status:running` / `status:stopped` / `status:crashed` tokens to filter by status; the
   active filter is shown in the panel title and stays applied until cleared with `Esc`
@@ -58,6 +61,7 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
 | `n` | Open "New Sandbox" dialog |
 | `s` | Start selected sandbox if stopped, or stop it (with confirmation) if running *(list focus only)* |
 | `t` | Terminate selected sandbox (SIGKILL), with confirmation *(list focus only, running sandboxes only)* |
+| `e` | Open the "Exec" dialog to run a command in a new host terminal *(list focus only, running sandboxes only)* |
 | `d` | Remove selected sandbox, with confirmation *(list focus only)* |
 | `v` | Open Volumes view |
 | `/` | Enter search/filter mode *(list focus only)* |

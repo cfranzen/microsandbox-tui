@@ -22,7 +22,7 @@ mod tests;
 
 pub use actions::{PendingAction, SandboxAction};
 pub use dialogs::{
-    CreateDialog, DialogTab, DirPicker, EnvVarsDialog, MountKindChoice, MountsDialog,
+    CreateDialog, DialogTab, DirPicker, EnvVarsDialog, ExecDialog, MountKindChoice, MountsDialog,
     NetworkRulesDialog, PortsDialog, SubDialogMode, VolumesView, DRIVES_ENTRY,
 };
 pub(crate) use keys::handle_event;
@@ -146,6 +146,9 @@ pub struct App {
     pub create_dialog: CreateDialog,
     /// Named-volumes management view state.
     pub volumes_view: VolumesView,
+    /// "Exec" dialog state: prompts for a command line, then opens a new
+    /// host terminal running it inside the selected sandbox.
+    pub exec_dialog: ExecDialog,
     /// Transient notification shown at the bottom.
     pub notification: Option<Notification>,
     /// A destructive action awaiting user confirmation, if any. While set,
@@ -194,6 +197,7 @@ impl App {
             fs_path: "/".into(),
             create_dialog: Default::default(),
             volumes_view: Default::default(),
+            exec_dialog: Default::default(),
             notification: None,
             confirm: None,
             should_quit: false,
