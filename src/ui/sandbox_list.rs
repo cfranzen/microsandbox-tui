@@ -1,26 +1,31 @@
 //! Left panel: sandbox list with status cards.
 
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Style},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
     symbols::line,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{
+        Block, Borders, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+    },
     Frame,
 };
+
+use microsandbox::sandbox::SandboxStatus;
 
 use crate::app::{App, Focus};
 use crate::sandbox::SandboxInfo;
 use crate::theme::Theme;
-use microsandbox::sandbox::SandboxStatus;
-use ratatui::widgets::Padding;
 
-/// Height of a single sandbox card (lines inside the border).
-const CARD_INNER_HEIGHT: u16 = 7;
+use super::util::fmt_bytes;
+
+/// Height of a single sandbox card (lines inside the border/padding):
+/// name, image, resources, separator, actions bar.
+const CARD_INNER_HEIGHT: u16 = 5;
 /// Total card height including border.
 const CARD_TOTAL_HEIGHT: u16 = CARD_INNER_HEIGHT + 2;
 /// Height of the "New Sandbox" placeholder.
-const NEW_CARD_HEIGHT: u16 = CARD_TOTAL_HEIGHT;
+const NEW_CARD_HEIGHT: u16 = 3;
 
 /// Render the sandbox list panel.
 ///
@@ -114,10 +119,13 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
                 height: CARD_TOTAL_HEIGHT,
             };
             app.mouse.card_rects.push((card_area, Some(abs_idx)));
+            let sb = &app.sandboxes[abs_idx];
+            let disk_used_bytes = app.metrics.get(&sb.name).and_then(|m| m.disk_used_bytes);
             render_sandbox_card(
                 f,
                 &theme,
-                &app.sandboxes[abs_idx],
+                sb,
+                disk_used_bytes,
                 selected,
                 panel_focused,
                 card_area,
@@ -146,7 +154,13 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     render_scrollbar(f, area, theme, panel_focused, &mut scrollbar_state);
 }
 
-fn render_scrollbar(f: &mut Frame, area: Rect, theme: Theme, panel_focused: bool, mut scrollbar_state: &mut ScrollbarState) {
+fn render_scrollbar(
+    f: &mut Frame,
+    area: Rect,
+    theme: Theme,
+    panel_focused: bool,
+    scrollbar_state: &mut ScrollbarState,
+) {
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
         .begin_symbol(None)
         .thumb_symbol(line::VERTICAL)
@@ -154,7 +168,7 @@ fn render_scrollbar(f: &mut Frame, area: Rect, theme: Theme, panel_focused: bool
         .end_symbol(None)
         .track_style(theme.border_style(false))
         .thumb_style(theme.border_style(panel_focused));
-    f.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    f.render_stateful_widget(scrollbar, area, scrollbar_state);
 }
 
 /// Render a single sandbox card.
@@ -162,6 +176,7 @@ fn render_sandbox_card(
     f: &mut Frame,
     theme: &Theme,
     sb: &SandboxInfo,
+    disk_used_bytes: Option<u64>,
     selected: bool,
     panel_focused: bool,
     area: Rect,
@@ -174,8 +189,9 @@ fn render_sandbox_card(
         .borders(Borders::ALL)
         .border_type(theme.border_type(highlight))
         .border_style(theme.border_style(highlight))
+        .padding(Padding::horizontal(1))
         .title(Span::styled(" Sandbox ", theme.title_accent()))
-        .title_alignment(ratatui::layout::Alignment::Right);
+        .title_alignment(Alignment::Right);
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -194,31 +210,26 @@ fn render_sandbox_card(
         Span::styled(status_dot, Style::default().fg(status_color)),
         Span::raw(" "),
         Span::styled(
-            truncate(&sb.name, inner.width.saturating_sub(4) as usize),
+            truncate(&sb.name, inner.width.saturating_sub(3) as usize),
             name_style,
         ),
-        Span::styled(
-            format!(
-                "  {}",
-                truncate(&sb.image, inner.width.saturating_sub(3) as usize)
-            ),
-            theme.muted(),
-        ),
+        if selected {
+            Span::styled(" ✓", theme.success())
+        } else {
+            Span::raw("")
+        },
     ]);
 
-    // Line 2: image name
-    let workdir_line = Line::from(vec![Span::styled(
+    // Line 2: image name, on its own dedicated line.
+    let image_line = Line::from(vec![Span::styled(
         format!(
-            "  {}",
-            truncate(
-                "TODO: Work dir missing here",
-                inner.width.saturating_sub(3) as usize
-            )
+            "Image: {}",
+            truncate(&sb.image, inner.width.saturating_sub(7) as usize)
         ),
         theme.muted(),
     )]);
 
-    // Line 3: cpu · memory · age
+    // Line 3: cpu · memory · disk · age
     let age = sb
         .created_at
         .map(|t| {
@@ -226,29 +237,24 @@ fn render_sandbox_card(
             humantime::format_duration(std::time::Duration::from_secs(secs)).to_string()
         })
         .unwrap_or_else(|| "—".into());
+    let disk = disk_used_bytes.map(fmt_bytes).unwrap_or_else(|| "—".into());
 
     let resource_line = Line::from(vec![Span::styled(
         format!(
-            "  {}cpus · {}MiB · {}",
+            "{}cpus · {}MiB · {} disk · {}",
             sb.cpus,
             sb.memory_mib,
+            disk,
             truncate(&age, 10)
         ),
         theme.muted(),
     )]);
 
-    // Line 4: action hints
-    let action_line = if selected && panel_focused {
-        match sb.status {
-            SandboxStatus::Running => {
-                Line::from(theme.hint_spans(&[("s", "top"), ("t", "erm"), ("d", "el")]))
-            }
-            SandboxStatus::Stopped => Line::from(theme.hint_spans(&[("s", "tart"), ("d", "el")])),
-            _ => Line::from(theme.hint_spans(&[("d", "el")])),
-        }
-    } else {
-        Line::raw("")
-    };
+    // Line 4: separator, directly above the actions bar.
+    let separator_line = Line::from(Span::styled(
+        "─".repeat(inner.width as usize),
+        theme.muted(),
+    ));
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -257,13 +263,17 @@ fn render_sandbox_card(
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
+            Constraint::Length(1),
         ])
         .split(inner);
 
     f.render_widget(Paragraph::new(name_line), chunks[0]);
-    f.render_widget(Paragraph::new(workdir_line), chunks[1]);
+    f.render_widget(Paragraph::new(image_line), chunks[1]);
     f.render_widget(Paragraph::new(resource_line), chunks[2]);
-    f.render_widget(Paragraph::new(action_line), chunks[3]);
+    f.render_widget(Paragraph::new(separator_line), chunks[3]);
+    // Line 5: actions bar — always shown, evenly distributed across the
+    // full card width, color-coded by the action's meaning.
+    render_actions_bar(f, *theme, sb.status, chunks[4]);
 }
 
 /// Render the "New Sandbox" placeholder card.
@@ -279,23 +289,68 @@ fn render_new_sandbox_card(
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .padding(Padding::vertical(3))
+        .padding(Padding::horizontal(1))
         .border_type(theme.border_type(highlight))
         .border_style(style);
 
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let label = Line::from(vec![Span::styled("+ New Sandbox", theme.text)]);
-    f.render_widget(
-        Paragraph::new(label).alignment(ratatui::layout::Alignment::Center),
-        inner,
-    );
+    let label = Line::from(vec![Span::styled(
+        "+ New Sandbox",
+        style.add_modifier(Modifier::BOLD),
+    )]);
+    f.render_widget(Paragraph::new(label).alignment(Alignment::Center), inner);
 }
 
 //--------------------------------------------------------------------------------------------------
 // Helpers
 //--------------------------------------------------------------------------------------------------
+
+/// The action shortcuts available for a sandbox in a given status, each
+/// with its own semantic color: start = success, stop = warning,
+/// terminate/delete = danger.
+fn action_items(theme: &Theme, status: SandboxStatus) -> Vec<(&'static str, &'static str, Color)> {
+    match status {
+        SandboxStatus::Running => vec![
+            ("s", "top", theme.warning),
+            ("t", "erm", theme.danger),
+            ("d", "el", theme.danger),
+        ],
+        SandboxStatus::Stopped => vec![("s", "tart", theme.success), ("d", "el", theme.danger)],
+        _ => vec![("d", "el", theme.danger)],
+    }
+}
+
+/// Render the action shortcuts distributed evenly across the full card
+/// width. Each shortcut's key letter is bold; the color encodes the
+/// action's meaning (see [`action_items`]).
+fn render_actions_bar(f: &mut Frame, theme: Theme, status: SandboxStatus, area: Rect) {
+    let items = action_items(&theme, status);
+    if items.is_empty() {
+        return;
+    }
+
+    let constraints: Vec<Constraint> = items
+        .iter()
+        .map(|_| Constraint::Ratio(1, items.len() as u32))
+        .collect();
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(constraints)
+        .split(area);
+
+    for (i, (key, rest, color)) in items.iter().enumerate() {
+        let line = Line::from(vec![
+            Span::styled(
+                *key,
+                Style::default().fg(*color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(*rest, Style::default().fg(*color)),
+        ]);
+        f.render_widget(Paragraph::new(line).alignment(Alignment::Center), cols[i]);
+    }
+}
 
 fn status_style(theme: &Theme, status: SandboxStatus) -> (ratatui::style::Color, &'static str) {
     let glyph = match status {

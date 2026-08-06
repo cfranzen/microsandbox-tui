@@ -8,6 +8,7 @@ mod info;
 mod layout;
 mod logs;
 mod sandbox_list;
+mod util;
 mod volumes;
 
 use ratatui::Frame;

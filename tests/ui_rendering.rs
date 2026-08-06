@@ -83,7 +83,7 @@ async fn test_render_header_contains_app_name() {
     let mut terminal = make_terminal();
     let mut app = make_app();
     let buf = render_to_string(&mut terminal, &mut app);
-    assert!(buf.contains("microsandbox"), "header should show app name");
+    assert!(buf.contains("MicroSandbox"), "header should show app name");
 }
 
 #[tokio::test]
