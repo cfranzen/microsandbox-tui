@@ -249,20 +249,14 @@ fn render_sandbox_card(
 
     // Line 3: image name, on its own dedicated line.
     let image_line = Line::from(vec![Span::styled(
-        format!(
-            "Image: {}",
-            truncate(&sb.image, inner.width.saturating_sub(7) as usize)
-        ),
+        truncate(&sb.image, inner.width as usize),
         theme.muted(),
     )]);
 
     // Line 4: working directory.
     let workdir_line = match sb.workdir.as_deref() {
         Some(workdir) => Line::from(vec![Span::styled(
-            format!(
-                "Workdir: {}",
-                truncate(workdir, inner.width.saturating_sub(9) as usize)
-            ),
+            truncate(workdir, inner.width as usize),
             theme.muted(),
         )]),
         None => Line::from(vec![Span::styled("(no work dir)", theme.muted())]),
@@ -289,7 +283,7 @@ fn render_sandbox_card(
             let disk = disk_used_bytes.map(fmt_bytes).unwrap_or_else(|| "—".into());
             Line::from(vec![Span::styled(
                 format!(
-                    "{}cpus · {}MiB · {} disk · {}",
+                    "{}cpu · {}MB · {} · {}",
                     sb.cpus,
                     sb.memory_mib,
                     disk,
