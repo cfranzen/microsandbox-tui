@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0](https://github.com/cfranzen/microsandbox-tui/compare/v0.2.0...v0.3.0) (2026-08-07)
+
+
+### Added
+
+* config file for default sandbox parameters ([1bc5d51](https://github.com/cfranzen/microsandbox-tui/commit/1bc5d51fa6d2e097b7d2320de954e61b09df4651))
+* initial microsandbox TUI implementation ([c40e7c7](https://github.com/cfranzen/microsandbox-tui/commit/c40e7c76337dab2273c85dd34ea22bde1393e8ba))
+* live streaming logs for running sandboxes ([9abe371](https://github.com/cfranzen/microsandbox-tui/commit/9abe37165bb6ac607bbbbb77ea9b6a5ea11f8910))
+* manage ports and env vars via sub-dialogs ([67c1991](https://github.com/cfranzen/microsandbox-tui/commit/67c199154e233dc37c155fbaf00e9c9f03426bec))
+* merge Metrics tab into Info tab, add disk usage gauge ([bc24440](https://github.com/cfranzen/microsandbox-tui/commit/bc244400935ac760029ec9e2f10ec6b3eaebcd0f))
+* metrics history sparklines for CPU and memory ([0e74b57](https://github.com/cfranzen/microsandbox-tui/commit/0e74b5727f8bec9e1c86e0cd201925b63c6dc585))
+* mouse support for list selection, tab switching, and scrolling ([cbae17a](https://github.com/cfranzen/microsandbox-tui/commit/cbae17a6f4eead1464e72d2f477e6d77fb3c763a))
+* multi-select bulk operations for start/stop/kill/remove ([3b29a58](https://github.com/cfranzen/microsandbox-tui/commit/3b29a5863679c15d2581ae6f62eba1557d38b608))
+* network policy editor for CIDR-based egress/ingress rules ([e0e5731](https://github.com/cfranzen/microsandbox-tui/commit/e0e57317e9b5a201110b7ddd31083ab35f0ca84a))
+* replace Ctrl+F workdir shortcut and Enter-to-create with explicit UI ([4b6142f](https://github.com/cfranzen/microsandbox-tui/commit/4b6142f492cb040f0df41b02a5c410cb2c0c1d89))
+* search/filter sandboxes by name or status ([df960c0](https://github.com/cfranzen/microsandbox-tui/commit/df960c041e25938efa406a418c2d14d2894a356e))
+* two-tab create dialog with workdir directory picker ([aa70587](https://github.com/cfranzen/microsandbox-tui/commit/aa70587f7352a046acfa8a0e35987a5752d6b27e))
+* volume/mount management (Volumes view + create-dialog mounts) ([958a298](https://github.com/cfranzen/microsandbox-tui/commit/958a298ad5e490194def5a66fb02e26e069ff690))
+
+
+### Fixed
+
+* add separator line at top of card ([3676ff4](https://github.com/cfranzen/microsandbox-tui/commit/3676ff47071a4a807a97e700965e2efc37fbd96d))
+* Add title to sandbox metrics and fixed spacing. ([427d8d1](https://github.com/cfranzen/microsandbox-tui/commit/427d8d12ee5550cbb0e43340547b17f23af0cccd))
+* added missing import ([e558fbb](https://github.com/cfranzen/microsandbox-tui/commit/e558fbbe2ebc3b18d64deb5b3fcc46ec177f960d))
+* adopt implementation to microsandbox API changes ([b637db5](https://github.com/cfranzen/microsandbox-tui/commit/b637db548f275e79b734af802485b43296aac145))
+* correct ESC key handling in dialog and main view ([74ebb36](https://github.com/cfranzen/microsandbox-tui/commit/74ebb3686bc58ac1b97ec65534d8d3a06513032d))
+* ensure version shown in UI is taken from release build ([8b4a258](https://github.com/cfranzen/microsandbox-tui/commit/8b4a258d6538325872e5b1be6db3b167ad8e6955))
+* fixed some style bugs ([1981f3a](https://github.com/cfranzen/microsandbox-tui/commit/1981f3a99fbca9a411816f16518d57ede4a7a2d4))
+* minor visual fixes ([4e443bb](https://github.com/cfranzen/microsandbox-tui/commit/4e443bbd490bb9059cd8fe401fad967d2f8ae336))
+* padding has been missing in different views ([df9fac2](https://github.com/cfranzen/microsandbox-tui/commit/df9fac27b47ee505b614bd2e6d0d313c597a6daf))
+
+
+### Changed
+
+* adopt lib.rs/main.rs split per Rust conventions ([fc6ec50](https://github.com/cfranzen/microsandbox-tui/commit/fc6ec50d354c9fa20dd052733e0e8b0054e19984))
+* split app.rs god-file into focused submodules ([499f9f9](https://github.com/cfranzen/microsandbox-tui/commit/499f9f9db45ea25ff36d5de22eeff7fe249349ea))
+
 ## [0.2.0](https://github.com/cfranzen/microsandbox-tui/compare/microsandbox-tui-v0.1.0...microsandbox-tui-v0.2.0) (2026-08-07)
 
 
