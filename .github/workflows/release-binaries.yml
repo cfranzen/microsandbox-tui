@@ -1,0 +1,129 @@
+name: Release Binaries
+
+# Builds msbui for all supported platforms and attaches the archives to the
+# GitHub release that release-please just published. Targets mirror what the
+# upstream microsandbox runtime itself ships (see
+# https://github.com/superradcompany/microsandbox/releases): Linux and Windows
+# on both x64/arm64, and macOS on arm64 only (Apple Silicon; upstream ships no
+# macOS x64 build either).
+#
+# Each target runs on a *native* GitHub-hosted runner for its architecture, so
+# no cross-compilation toolchain is needed and native apt dependencies (e.g.
+# libcap-ng-dev) resolve correctly for arm64 as well as x64.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and upload binaries for
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - name: linux-aarch64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive: tar.gz
+          - name: macos-aarch64
+            os: macos-14
+            target: aarch64-apple-darwin
+            archive: tar.gz
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+          - name: windows-aarch64
+            os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: echo "tag=${{ github.event.inputs.tag || github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcap-ng-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      - name: Package (Unix)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="msbui-${{ steps.tag.outputs.tag }}-${{ matrix.name }}"
+          mkdir -p "$stage"
+          cp "target/${{ matrix.target }}/release/msbui" "$stage/"
+          cp README.md LICENSE "$stage/"
+          tar czf "${stage}.tar.gz" "$stage"
+          echo "ASSET=${stage}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Package (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $stage = "msbui-${{ steps.tag.outputs.tag }}-${{ matrix.name }}"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/msbui.exe" -Destination $stage
+          Copy-Item README.md,LICENSE -Destination $stage
+          Compress-Archive -Path $stage -DestinationPath "$stage.zip"
+          Add-Content -Path $env:GITHUB_ENV -Value "ASSET=$stage.zip"
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: gh release upload "${{ steps.tag.outputs.tag }}" "${{ env.ASSET }}" --clobber --repo "${{ github.repository }}"
+
+  checksums:
+    name: Publish checksums
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve release tag
+        id: tag
+        run: echo "tag=${{ github.event.inputs.tag || github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate checksums for release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "${{ steps.tag.outputs.tag }}" --repo "${{ github.repository }}" --dir dist --pattern "msbui-*"
+          (cd dist && sha256sum msbui-* > checksums.txt)
+          gh release upload "${{ steps.tag.outputs.tag }}" "dist/checksums.txt" --clobber --repo "${{ github.repository }}"

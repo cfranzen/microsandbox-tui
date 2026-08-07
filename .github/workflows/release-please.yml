@@ -1,0 +1,33 @@
+name: Release Please
+
+# Drives releases from Conventional Commits (https://www.conventionalcommits.org/).
+# On every push to main, release-please either:
+#   - opens/updates a "release PR" that bumps the version in Cargo.toml/Cargo.lock
+#     and updates CHANGELOG.md based on commits since the last release, or
+#   - if that release PR was just merged, tags the merge commit (vX.Y.Z), creates
+#     a GitHub release with generated notes, and reports it via `release_created`.
+#
+# Publishing the release below triggers .github/workflows/release-binaries.yml,
+# which builds and uploads the platform binaries for that tag.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
