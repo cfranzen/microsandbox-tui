@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0](https://github.com/cfranzen/microsandbox-tui/compare/v0.3.0...v0.4.0) (2026-08-07)
+
+
+### Added
+
+* natively implement exec session to remove dependency on msb app ([bcaeb01](https://github.com/cfranzen/microsandbox-tui/commit/bcaeb01d556aad064708f3eb635cfc3e312f5187))
+* redesigned metrics view ([c5e52ba](https://github.com/cfranzen/microsandbox-tui/commit/c5e52ba553270548413e182bb84a3853407592fd))
+* restructured details tabs. added explicit metrics view ([d92166f](https://github.com/cfranzen/microsandbox-tui/commit/d92166f7216fe7c95062a89db3747f9e028a9726))
+* show working dir as host path ([4107e0d](https://github.com/cfranzen/microsandbox-tui/commit/4107e0d50eae24484a099646ad1a655c0696cd4d))
+* unify the appearance of tabs ([f0166b3](https://github.com/cfranzen/microsandbox-tui/commit/f0166b3da1f02c74d87bcf4f51a1aabeeabde86f))
+
+
+### Fixed
+
+* up / down arrows are not working in sandbox shell ([c6b07ee](https://github.com/cfranzen/microsandbox-tui/commit/c6b07ee8d3eb60ddfe40890414f06eea47d185cd))
+
 ## [0.3.0](https://github.com/cfranzen/microsandbox-tui/compare/v0.2.0...v0.3.0) (2026-08-07)
 
 
