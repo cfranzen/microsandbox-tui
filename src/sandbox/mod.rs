@@ -5,7 +5,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use futures::Stream;
 use microsandbox::logs::{LogStreamOptions, LogStreamStart};
-use microsandbox::sandbox::{FsEntryKind, LogEntry, LogOptions, LogSource};
+use microsandbox::sandbox::{FsEntryKind, LogEntry, LogOptions, LogSource, MAX_SANDBOX_LIST_LIMIT};
 use microsandbox::{MicrosandboxError, NetworkPolicy, Sandbox, SandboxMetrics, Volume, VolumeKind};
 
 // Re-export for use in other modules
@@ -193,38 +193,60 @@ pub struct CreateConfig {
 //--------------------------------------------------------------------------------------------------
 
 /// Retrieve all sandboxes from the local backend.
+///
+/// `Sandbox::list()` returns a single (possibly partial) [`SandboxPage`], so
+/// we page through with `list_with` (using the max page size) until the
+/// backend stops returning a `next_cursor`, collecting every sandbox.
 pub async fn list_sandboxes() -> Result<Vec<SandboxInfo>> {
-    let handles = Sandbox::list().await?;
-    let mut infos = Vec::with_capacity(handles.len());
-    for h in handles {
-        let (image, cpus, memory_mib, workdir) = if let Ok(cfg) = h.config() {
-            let image = cfg
-                .spec
-                .image
-                .oci_reference()
-                .unwrap_or("(bind/disk)")
-                .to_owned();
-            (
-                image,
-                cfg.spec.resources.cpus,
-                cfg.spec.resources.memory_mib,
-                cfg.spec.runtime.workdir.clone(),
-            )
-        } else {
-            ("—".into(), 1, 512, None)
-        };
+    let mut infos = Vec::new();
+    let mut cursor: Option<String> = None;
 
-        infos.push(SandboxInfo {
-            name: h.name().to_owned(),
-            status: h.status_snapshot(),
-            image,
-            cpus,
-            memory_mib,
-            created_at: h.created_at(),
-            updated_at: h.updated_at(),
-            workdir,
-        });
+    loop {
+        let page = Sandbox::list_with(|list| {
+            let list = list.limit(MAX_SANDBOX_LIST_LIMIT);
+            match cursor.take() {
+                Some(c) => list.cursor(c),
+                None => list,
+            }
+        })
+        .await?;
+
+        for h in page.sandboxes {
+            let (image, cpus, memory_mib, workdir) = if let Ok(cfg) = h.config() {
+                let image = cfg
+                    .spec
+                    .image
+                    .oci_reference()
+                    .unwrap_or("(bind/disk)")
+                    .to_owned();
+                (
+                    image,
+                    cfg.spec.resources.cpus,
+                    cfg.spec.resources.memory_mib,
+                    cfg.spec.runtime.workdir.clone(),
+                )
+            } else {
+                ("—".into(), 1, 512, None)
+            };
+
+            infos.push(SandboxInfo {
+                name: h.name().to_owned(),
+                status: h.status_snapshot(),
+                image,
+                cpus,
+                memory_mib,
+                created_at: h.created_at(),
+                updated_at: h.updated_at(),
+                workdir,
+            });
+        }
+
+        match page.next_cursor {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
     }
+
     Ok(infos)
 }
 
