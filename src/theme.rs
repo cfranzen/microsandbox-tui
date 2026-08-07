@@ -19,6 +19,7 @@
 
 use microsandbox::sandbox::SandboxStatus;
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::Span;
 use ratatui::widgets::BorderType;
 
 /// Which built-in palette a [`Theme`] represents. Used to label the theme
@@ -225,6 +226,40 @@ impl Theme {
     /// used for standalone chips like the header title.
     pub fn badge(&self) -> Style {
         self.selected()
+    }
+
+    /// Style for a single label in a horizontal tab bar. Used by every
+    /// tabbed view in the app (detail panel's Info/Metrics/Logs/Filesystem
+    /// tabs, the create-sandbox dialog's Basic/Advanced tabs, ...) so they
+    /// all look identical.
+    pub fn tab_style(&self, active: bool) -> Style {
+        if active {
+            self.selected()
+        } else {
+            self.secondary()
+        }
+    }
+
+    /// Build the spans for a full horizontal tab bar from `(label,
+    /// is_active)` pairs: each label is padded to `" Label "` and styled
+    /// via [`Theme::tab_style`], with a two-space gap between labels.
+    /// Alongside the spans, returns the on-screen width (in columns) of
+    /// each individual label span (including its padding, excluding the
+    /// trailing gap), so callers that need per-tab mouse hit-rects (e.g.
+    /// the detail panel) don't have to re-derive the padding/spacing
+    /// rules themselves.
+    pub fn tab_bar<'a>(&self, labels: &[(&'a str, bool)]) -> (Vec<Span<'a>>, Vec<u16>) {
+        let mut spans = Vec::with_capacity(labels.len() * 2);
+        let mut widths = Vec::with_capacity(labels.len());
+        for (i, &(label, active)) in labels.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::raw("  "));
+            }
+            let text = format!(" {label} ");
+            widths.push(text.chars().count() as u16);
+            spans.push(Span::styled(text, self.tab_style(active)));
+        }
+        (spans, widths)
     }
 
     pub fn success(&self) -> Style {

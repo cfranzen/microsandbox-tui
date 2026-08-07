@@ -77,32 +77,24 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 
 fn render_tab_bar(f: &mut Frame, app: &mut App, area: Rect) {
     let theme = app.theme;
-    let mut spans: Vec<Span> = Vec::new();
     app.mouse.tab_rects.clear();
+
+    let tabs = DetailTab::all();
+    let labels: Vec<(&str, bool)> = tabs.iter().map(|&tab| (tab.title(), tab == app.tab)).collect();
+    let (spans, widths) = theme.tab_bar(&labels);
+
     let mut x = area.x;
-
-    for &tab in DetailTab::all() {
-        let active = tab == app.tab;
-        let style = if active {
-            theme.selected()
-        } else {
-            theme.muted()
-        };
-        let label = format!(" {} ", tab.title());
-        let label_width = label.chars().count() as u16;
-        spans.push(Span::styled(label, style));
-        spans.push(Span::raw("  "));
-
+    for (&tab, &width) in tabs.iter().zip(widths.iter()) {
         if x < area.x + area.width {
             let rect = Rect {
                 x,
                 y: area.y,
-                width: label_width.min(area.x + area.width - x),
+                width: width.min(area.x + area.width - x),
                 height: 1,
             };
             app.mouse.tab_rects.push((rect, tab));
         }
-        x += label_width + 2;
+        x += width + 2;
     }
 
     f.render_widget(Paragraph::new(Line::from(spans)), area);

@@ -207,21 +207,13 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_tab_bar(f: &mut Frame, theme: &Theme, tab: DialogTab, area: Rect) {
-    let basic = if tab == DialogTab::Basic {
-        Span::styled("[Basic]", theme.selected())
-    } else {
-        Span::styled("[Basic]", theme.secondary())
-    };
-    let advanced = if tab == DialogTab::Advanced {
-        Span::styled("[Advanced]", theme.selected())
-    } else {
-        Span::styled("[Advanced]", theme.secondary())
-    };
+    let labels = [
+        (DialogTab::Basic.title(), tab == DialogTab::Basic),
+        (DialogTab::Advanced.title(), tab == DialogTab::Advanced),
+    ];
+    let (spans, _) = theme.tab_bar(&labels);
 
-    f.render_widget(
-        Paragraph::new(Line::from(vec![basic, Span::raw(" "), advanced])),
-        area,
-    );
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn render_field(f: &mut Frame, theme: &Theme, label: &str, value: &str, focused: bool, area: Rect) {

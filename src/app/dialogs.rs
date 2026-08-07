@@ -28,6 +28,13 @@ impl DialogTab {
         // With only two tabs, prev == next
         self.next()
     }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            DialogTab::Basic => "Basic",
+            DialogTab::Advanced => "Advanced",
+        }
+    }
 }
 
 /// Sentinel entry that opens the drive-selection view.

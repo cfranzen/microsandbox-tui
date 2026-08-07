@@ -83,7 +83,7 @@ impl DetailTab {
     }
 
     pub fn all() -> &'static [DetailTab] {
-        &[DetailTab::Logs, DetailTab::Filesystem, DetailTab::Info]
+        &[DetailTab::Info, DetailTab::Logs, DetailTab::Filesystem]
     }
 }
 
@@ -187,7 +187,7 @@ impl App {
             filter: String::new(),
             search_active: false,
             focus: Focus::SandboxList,
-            tab: DetailTab::Logs,
+            tab: DetailTab::Info,
             log_scroll: 0,
             fs_scroll: 0,
             logs: Default::default(),
