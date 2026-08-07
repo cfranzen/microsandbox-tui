@@ -6,7 +6,7 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     text::Span,
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Padding, Paragraph},
     Frame,
 };
 
@@ -38,7 +38,8 @@ fn render_list(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_type(theme.border_unfocused_type)
         .border_style(theme.accent())
-        .style(theme.base_style());
+        .style(theme.base_style())
+        .padding(Padding::horizontal(1));
 
     let inner = block.inner(popup);
     f.render_widget(block, popup);
@@ -55,7 +56,7 @@ fn render_list(f: &mut Frame, app: &App, area: Rect) {
     if view.volumes.is_empty() {
         f.render_widget(
             Paragraph::new(Span::styled(
-                "  (no named volumes — press 'n' to create one)",
+                "(no named volumes — press 'n' to create one)",
                 theme.muted(),
             )),
             chunks[0],
@@ -86,16 +87,13 @@ fn render_list(f: &mut Frame, app: &App, area: Rect) {
                 fmt_bytes(vol.used_bytes)
             );
             let row = Rect::new(chunks[0].x, chunks[0].y + i as u16, chunks[0].width, 1);
-            f.render_widget(
-                Paragraph::new(Span::styled(format!("  {entry}"), style)),
-                row,
-            );
+            f.render_widget(Paragraph::new(Span::styled(entry, style)), row);
         }
     }
 
     if let Some(ref err) = view.error {
         f.render_widget(
-            Paragraph::new(Span::styled(format!("  ✗ {err}"), theme.danger())),
+            Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
             chunks[1],
         );
     }
@@ -124,7 +122,8 @@ fn render_add(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_type(theme.border_unfocused_type)
         .border_style(theme.accent())
-        .style(theme.base_style());
+        .style(theme.base_style())
+        .padding(Padding::horizontal(1));
 
     let inner = block.inner(popup);
     f.render_widget(block, popup);
@@ -158,7 +157,7 @@ fn render_add(f: &mut Frame, app: &App, area: Rect) {
 
     if let Some(ref err) = view.error {
         f.render_widget(
-            Paragraph::new(Span::styled(format!(" ✗ {err}"), theme.danger())),
+            Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
             chunks[2],
         );
     } else {

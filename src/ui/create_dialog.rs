@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Modifier,
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Padding, Paragraph},
     Frame,
 };
 
@@ -27,7 +27,8 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_type(theme.border_unfocused_type)
         .border_style(theme.accent())
-        .style(theme.base_style());
+        .style(theme.base_style())
+        .padding(Padding::horizontal(1));
 
     let inner = block.inner(popup);
     f.render_widget(block, popup);
@@ -181,7 +182,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     };
     if let Some(ref err) = dlg.error {
         f.render_widget(
-            Paragraph::new(Span::styled(format!("  ✗ {err}"), theme.danger())),
+            Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
             message_chunk,
         );
     } else {
@@ -464,7 +465,8 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
                 .title(Span::styled(" Manage Ports ", theme.accent_bold()))
                 .borders(Borders::ALL)
                 .border_type(theme.border_unfocused_type)
-                .border_style(theme.accent());
+                .border_style(theme.accent())
+                .padding(Padding::horizontal(1));
 
             let inner = block.inner(popup);
             f.render_widget(block, popup);
@@ -480,7 +482,7 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             if dialog.entries.is_empty() {
                 f.render_widget(
-                    Paragraph::new(Span::styled("  (no ports configured)", theme.muted())),
+                    Paragraph::new(Span::styled("(no ports configured)", theme.muted())),
                     chunks[0],
                 );
             } else {
@@ -496,7 +498,7 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
                     };
                     let row = Rect::new(chunks[0].x, chunks[0].y + i as u16, chunks[0].width, 1);
                     f.render_widget(
-                        Paragraph::new(Span::styled(format!("  {host}:{guest}"), style)),
+                        Paragraph::new(Span::styled(format!("{host}:{guest}"), style)),
                         row,
                     );
                 }
@@ -504,7 +506,7 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
-                    Paragraph::new(Span::styled(format!("  ✗ {err}"), theme.danger())),
+                    Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
                     chunks[1],
                 );
             }
@@ -528,7 +530,8 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
                 .title(Span::styled(" Add Port Mapping ", theme.accent_bold()))
                 .borders(Borders::ALL)
                 .border_type(theme.border_unfocused_type)
-                .border_style(theme.accent());
+                .border_style(theme.accent())
+                .padding(Padding::horizontal(1));
 
             let inner = block.inner(popup);
             f.render_widget(block, popup);
@@ -562,7 +565,7 @@ fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
-                    Paragraph::new(Span::styled(format!(" ✗ {err}"), theme.danger())),
+                    Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
                     chunks[3],
                 );
             } else {
@@ -601,7 +604,8 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
                 ))
                 .borders(Borders::ALL)
                 .border_type(theme.border_unfocused_type)
-                .border_style(theme.accent());
+                .border_style(theme.accent())
+                .padding(Padding::horizontal(1));
 
             let inner = block.inner(popup);
             f.render_widget(block, popup);
@@ -618,7 +622,7 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
             if dialog.entries.is_empty() {
                 f.render_widget(
                     Paragraph::new(Span::styled(
-                        "  (no environment variables configured)",
+                        "(no environment variables configured)",
                         theme.muted(),
                     )),
                     chunks[0],
@@ -643,16 +647,13 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
                         entry
                     };
                     let row = Rect::new(chunks[0].x, chunks[0].y + i as u16, chunks[0].width, 1);
-                    f.render_widget(
-                        Paragraph::new(Span::styled(format!("  {display}"), style)),
-                        row,
-                    );
+                    f.render_widget(Paragraph::new(Span::styled(display, style)), row);
                 }
             }
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
-                    Paragraph::new(Span::styled(format!("  ✗ {err}"), theme.danger())),
+                    Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
                     chunks[1],
                 );
             }
@@ -679,7 +680,8 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
                 ))
                 .borders(Borders::ALL)
                 .border_type(theme.border_unfocused_type)
-                .border_style(theme.accent());
+                .border_style(theme.accent())
+                .padding(Padding::horizontal(1));
 
             let inner = block.inner(popup);
             f.render_widget(block, popup);
@@ -713,7 +715,7 @@ fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
-                    Paragraph::new(Span::styled(format!(" ✗ {err}"), theme.danger())),
+                    Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
                     chunks[3],
                 );
             } else {
@@ -748,7 +750,8 @@ fn render_dir_picker(f: &mut Frame, app: &App, area: Rect) {
         .title(Span::styled(title, theme.accent_bold()))
         .borders(Borders::ALL)
         .border_type(theme.border_unfocused_type)
-        .border_style(theme.accent());
+        .border_style(theme.accent())
+        .padding(Padding::horizontal(1));
 
     let inner = block.inner(popup);
     f.render_widget(block, popup);
@@ -766,9 +769,9 @@ fn render_dir_picker(f: &mut Frame, app: &App, area: Rect) {
 
     // Header line
     let header = if picker.showing_drives {
-        " 🖴 Available Drives".to_owned()
+        "🖴 Available Drives".to_owned()
     } else {
-        format!(" 📂 {}", picker.path)
+        format!("📂 {}", picker.path)
     };
     f.render_widget(
         Paragraph::new(Span::styled(header, theme.accent())),
@@ -807,7 +810,7 @@ fn render_dir_picker(f: &mut Frame, app: &App, area: Rect) {
         };
         let entry_area = Rect::new(chunks[2].x, chunks[2].y + row as u16, chunks[2].width, 1);
         f.render_widget(
-            Paragraph::new(Span::styled(format!(" {prefix}{entry}"), style)),
+            Paragraph::new(Span::styled(format!("{prefix}{entry}"), style)),
             entry_area,
         );
     }
@@ -857,7 +860,8 @@ fn render_network_rules_dialog(f: &mut Frame, app: &App, area: Rect) {
                 .title(Span::styled(" Manage Network Rules ", theme.accent_bold()))
                 .borders(Borders::ALL)
                 .border_type(theme.border_unfocused_type)
-                .border_style(theme.accent());
+                .border_style(theme.accent())
+                .padding(Padding::horizontal(1));
 
             let inner = block.inner(popup);
             f.render_widget(block, popup);
@@ -874,7 +878,7 @@ fn render_network_rules_dialog(f: &mut Frame, app: &App, area: Rect) {
             if dialog.entries.is_empty() {
                 f.render_widget(
                     Paragraph::new(Span::styled(
-                        "  (no rules — default allow-all policy)",
+                        "(no rules — default allow-all policy)",
                         theme.muted(),
                     )),
                     chunks[0],
@@ -897,16 +901,13 @@ fn render_network_rules_dialog(f: &mut Frame, app: &App, area: Rect) {
                         rule.cidr
                     );
                     let row = Rect::new(chunks[0].x, chunks[0].y + i as u16, chunks[0].width, 1);
-                    f.render_widget(
-                        Paragraph::new(Span::styled(format!("  {entry}"), style)),
-                        row,
-                    );
+                    f.render_widget(Paragraph::new(Span::styled(entry, style)), row);
                 }
             }
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
-                    Paragraph::new(Span::styled(format!("  ✗ {err}"), theme.danger())),
+                    Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
                     chunks[1],
                 );
             }
@@ -930,7 +931,8 @@ fn render_network_rules_dialog(f: &mut Frame, app: &App, area: Rect) {
                 .title(Span::styled(" Add Network Rule ", theme.accent_bold()))
                 .borders(Borders::ALL)
                 .border_type(theme.border_unfocused_type)
-                .border_style(theme.accent());
+                .border_style(theme.accent())
+                .padding(Padding::horizontal(1));
 
             let inner = block.inner(popup);
             f.render_widget(block, popup);
@@ -958,13 +960,13 @@ fn render_network_rules_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
-                    Paragraph::new(Span::styled(format!(" ✗ {err}"), theme.danger())),
+                    Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
                     chunks[2],
                 );
             } else {
                 f.render_widget(
                     Paragraph::new(Span::styled(
-                        " Type CIDR   Enter add   Esc cancel",
+                        "Type CIDR   Enter add   Esc cancel",
                         theme.muted(),
                     )),
                     chunks[2],
@@ -999,7 +1001,8 @@ fn render_mounts_dialog(f: &mut Frame, app: &App, area: Rect) {
                 .title(Span::styled(" Manage Volume Mounts ", theme.accent_bold()))
                 .borders(Borders::ALL)
                 .border_type(theme.border_unfocused_type)
-                .border_style(theme.accent());
+                .border_style(theme.accent())
+                .padding(Padding::horizontal(1));
 
             let inner = block.inner(popup);
             f.render_widget(block, popup);
@@ -1015,7 +1018,7 @@ fn render_mounts_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             if dialog.entries.is_empty() {
                 f.render_widget(
-                    Paragraph::new(Span::styled("  (no mounts configured)", theme.muted())),
+                    Paragraph::new(Span::styled("(no mounts configured)", theme.muted())),
                     chunks[0],
                 );
             } else {
@@ -1038,16 +1041,13 @@ fn render_mounts_dialog(f: &mut Frame, app: &App, area: Rect) {
                         }
                     };
                     let row = Rect::new(chunks[0].x, chunks[0].y + i as u16, chunks[0].width, 1);
-                    f.render_widget(
-                        Paragraph::new(Span::styled(format!("  {entry}"), style)),
-                        row,
-                    );
+                    f.render_widget(Paragraph::new(Span::styled(entry, style)), row);
                 }
             }
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
-                    Paragraph::new(Span::styled(format!("  ✗ {err}"), theme.danger())),
+                    Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
                     chunks[1],
                 );
             }
@@ -1071,7 +1071,8 @@ fn render_mounts_dialog(f: &mut Frame, app: &App, area: Rect) {
                 .title(Span::styled(" Add Volume Mount ", theme.accent_bold()))
                 .borders(Borders::ALL)
                 .border_type(theme.border_unfocused_type)
-                .border_style(theme.accent());
+                .border_style(theme.accent())
+                .padding(Padding::horizontal(1));
 
             let inner = block.inner(popup);
             f.render_widget(block, popup);
@@ -1118,7 +1119,7 @@ fn render_mounts_dialog(f: &mut Frame, app: &App, area: Rect) {
 
             if let Some(ref err) = dialog.error {
                 f.render_widget(
-                    Paragraph::new(Span::styled(format!(" ✗ {err}"), theme.danger())),
+                    Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
                     chunks[3],
                 );
             } else {

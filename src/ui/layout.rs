@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::Modifier,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Padding, Paragraph},
     Frame,
 };
 
@@ -72,7 +72,8 @@ pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_type(theme.border_type(false))
         .border_style(theme.border_style(false))
-        .style(theme.base_style());
+        .style(theme.base_style())
+        .padding(Padding::horizontal(1));
     let inner = block.inner(area);
     f.render_widget(block, area);
 
