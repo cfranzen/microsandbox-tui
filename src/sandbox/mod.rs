@@ -7,6 +7,7 @@ use futures::Stream;
 use microsandbox::logs::{LogStreamOptions, LogStreamStart};
 use microsandbox::sandbox::{FsEntryKind, LogEntry, LogOptions, LogSource, MAX_SANDBOX_LIST_LIMIT};
 use microsandbox::{MicrosandboxError, NetworkPolicy, Sandbox, SandboxMetrics, Volume, VolumeKind};
+use microsandbox_types::VolumeMount;
 
 // Re-export for use in other modules
 pub use microsandbox::sandbox::SandboxStatus;
@@ -155,6 +156,37 @@ pub fn host_path_to_guest_path(host_path: &str) -> String {
     }
 }
 
+/// Given a sandbox's guest workdir and its configured mounts, find the host
+/// path that's bind-mounted at (or as an ancestor of) that guest path, so the
+/// TUI can display the working directory as it appears on the host rather
+/// than inside the guest.
+///
+/// Falls back to the raw guest path unchanged when no bind mount covers it
+/// (e.g. the workdir lives on the root OCI filesystem with no host backing).
+fn resolve_workdir_host_path(workdir: &str, mounts: &[VolumeMount]) -> String {
+    let normalized_workdir = workdir.trim_end_matches('/');
+
+    for mount in mounts {
+        if let VolumeMount::Bind { host, guest, .. } = mount {
+            let normalized_guest = guest.trim_end_matches('/');
+            if normalized_workdir == normalized_guest {
+                return host.display().to_string();
+            }
+            // The workdir is a subdirectory of a bind-mounted host directory.
+            if let Some(rest) = normalized_workdir.strip_prefix(normalized_guest) {
+                if let Some(rest) = rest.strip_prefix('/') {
+                    let mut host_path = host.display().to_string();
+                    host_path.push('/');
+                    host_path.push_str(rest);
+                    return host_path;
+                }
+            }
+        }
+    }
+
+    workdir.to_owned()
+}
+
 /// Summary of a named volume, as shown in the Volumes view.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VolumeInfo {
@@ -219,11 +251,17 @@ pub async fn list_sandboxes() -> Result<Vec<SandboxInfo>> {
                     .oci_reference()
                     .unwrap_or("(bind/disk)")
                     .to_owned();
+                let workdir = cfg
+                    .spec
+                    .runtime
+                    .workdir
+                    .as_deref()
+                    .map(|w| resolve_workdir_host_path(w, &cfg.spec.mounts));
                 (
                     image,
                     cfg.spec.resources.cpus,
                     cfg.spec.resources.memory_mib,
-                    cfg.spec.runtime.workdir.clone(),
+                    workdir,
                 )
             } else {
                 ("—".into(), 1, 512, None)
@@ -550,6 +588,49 @@ pub async fn remove_volume(name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── resolve_workdir_host_path ────────────────────────────────────────────
+
+    fn bind_mount(host: &str, guest: &str) -> VolumeMount {
+        VolumeMount::Bind {
+            host: host.into(),
+            guest: guest.to_owned(),
+            options: Default::default(),
+            stat_virtualization: microsandbox_types::StatVirtualization::Relaxed,
+            host_permissions: microsandbox_types::HostPermissions::Private,
+            follow_root_symlinks: false,
+            quota_mib: None,
+        }
+    }
+
+    #[test]
+    fn test_resolve_workdir_host_path_exact_match() {
+        let mounts = vec![bind_mount("/home/user/project", "/workspace")];
+        assert_eq!(
+            resolve_workdir_host_path("/workspace", &mounts),
+            "/home/user/project"
+        );
+    }
+
+    #[test]
+    fn test_resolve_workdir_host_path_subdirectory() {
+        let mounts = vec![bind_mount("/home/user/project", "/workspace")];
+        assert_eq!(
+            resolve_workdir_host_path("/workspace/src", &mounts),
+            "/home/user/project/src"
+        );
+    }
+
+    #[test]
+    fn test_resolve_workdir_host_path_no_matching_mount_falls_back_to_guest() {
+        let mounts = vec![bind_mount("/home/user/project", "/other")];
+        assert_eq!(resolve_workdir_host_path("/workspace", &mounts), "/workspace");
+    }
+
+    #[test]
+    fn test_resolve_workdir_host_path_no_mounts_falls_back_to_guest() {
+        assert_eq!(resolve_workdir_host_path("/workspace", &[]), "/workspace");
+    }
 
     // ── SandboxInfo ──────────────────────────────────────────────────────────
 

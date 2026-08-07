@@ -2611,6 +2611,7 @@ dependencies = [
  "futures",
  "humantime",
  "microsandbox",
+ "microsandbox-types",
  "ratatui",
  "serde",
  "serde_json",
