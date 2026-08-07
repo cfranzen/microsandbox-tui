@@ -8,7 +8,7 @@
 
 use std::process::Command;
 
-use anyhow::{Result};
+use anyhow::{bail, Result};
 
 /// Open a new terminal window on the host running
 /// `msb exec <sandbox_name> -- sh -c <command>`.
