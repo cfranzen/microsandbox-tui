@@ -55,12 +55,14 @@ jobs:
             target: aarch64-pc-windows-msvc
             archive: zip
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
       - name: Resolve release tag
         id: tag
         shell: bash
         run: echo "tag=${{ github.event.inputs.tag || github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
