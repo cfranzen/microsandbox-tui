@@ -49,7 +49,10 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
 
     let title = Span::styled(" MicroSandbox UI ", theme.badge());
     let subtitle = Span::styled(" -  Manage all your sandboxes in one place", theme.muted());
-    let version = Span::styled(" v0.1.0 ", theme.muted());
+    let version = Span::styled(
+        format!(" v{} ", env!("CARGO_PKG_VERSION")),
+        theme.muted(),
+    );
 
     let line = Line::from(vec![title, subtitle]);
     let version_line = Line::from(vec![version]).alignment(Alignment::Right);
