@@ -481,7 +481,8 @@ pub const DEFAULT_EXEC_COMMAND: &str = "sh";
 
 /// State of the "Exec" dialog: prompts for a command line to run inside a
 /// running sandbox, then opens a new terminal window on the host that runs
-/// it there via the `msb` CLI's `exec` subcommand.
+/// it there natively via the `microsandbox` SDK (see
+/// [`crate::terminal_launcher`]).
 #[derive(Debug, Clone, Default)]
 pub struct ExecDialog {
     pub visible: bool,

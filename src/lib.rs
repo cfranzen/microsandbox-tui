@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod config;
+pub mod exec_session;
 pub mod sandbox;
 pub mod terminal_launcher;
 pub mod theme;
