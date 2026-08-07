@@ -82,7 +82,7 @@ fn test_initial_state() {
     assert!(app.sandboxes.is_empty());
     assert_eq!(app.selected, 0);
     assert_eq!(app.focus, Focus::SandboxList);
-    assert_eq!(app.tab, DetailTab::Logs);
+    assert_eq!(app.tab, DetailTab::Info);
     assert!(!app.should_quit);
     assert!(!app.create_dialog.visible);
     assert!(app.notification.is_none());
@@ -293,24 +293,28 @@ fn test_select_prev_moves_back() {
 #[test]
 fn test_next_tab_cycles_forward() {
     let mut app = make_app();
+    assert_eq!(app.tab, DetailTab::Info);
+    app.next_tab();
+    assert_eq!(app.tab, DetailTab::Metrics);
+    app.next_tab();
     assert_eq!(app.tab, DetailTab::Logs);
     app.next_tab();
     assert_eq!(app.tab, DetailTab::Filesystem);
     app.next_tab();
-    assert_eq!(app.tab, DetailTab::Info);
-    app.next_tab();
-    assert_eq!(app.tab, DetailTab::Logs); // wraps
+    assert_eq!(app.tab, DetailTab::Info); // wraps
 }
 
 #[test]
 fn test_prev_tab_cycles_backward() {
     let mut app = make_app();
     app.prev_tab();
-    assert_eq!(app.tab, DetailTab::Info); // wraps
-    app.prev_tab();
-    assert_eq!(app.tab, DetailTab::Filesystem);
+    assert_eq!(app.tab, DetailTab::Filesystem); // wraps
     app.prev_tab();
     assert_eq!(app.tab, DetailTab::Logs);
+    app.prev_tab();
+    assert_eq!(app.tab, DetailTab::Metrics);
+    app.prev_tab();
+    assert_eq!(app.tab, DetailTab::Info);
 }
 
 #[test]
@@ -428,11 +432,12 @@ fn test_detail_tab_titles() {
     assert_eq!(DetailTab::Logs.title(), "Logs");
     assert_eq!(DetailTab::Filesystem.title(), "Filesystem");
     assert_eq!(DetailTab::Info.title(), "Info");
+    assert_eq!(DetailTab::Metrics.title(), "Metrics");
 }
 
 #[test]
-fn test_detail_tab_all_has_three_entries() {
-    assert_eq!(DetailTab::all().len(), 3);
+fn test_detail_tab_all_has_four_entries() {
+    assert_eq!(DetailTab::all().len(), 4);
 }
 
 // ── handle_message ───────────────────────────────────────────────────────
@@ -1033,14 +1038,14 @@ fn test_tab_advances_tab_in_detail_focus() {
     app.focus = Focus::Detail;
     handle_event(&mut app, key_press(KeyCode::Tab));
     assert_eq!(app.focus, Focus::Detail);
-    assert_eq!(app.tab, DetailTab::Filesystem);
+    assert_eq!(app.tab, DetailTab::Metrics);
 }
 
 #[test]
 fn test_backtab_from_leftmost_tab_switches_focus_to_list() {
     let mut app = make_app();
     app.focus = Focus::Detail;
-    assert_eq!(app.tab, DetailTab::Logs); // leftmost tab
+    assert_eq!(app.tab, DetailTab::Info); // leftmost tab
     handle_event(&mut app, key_press(KeyCode::BackTab));
     assert_eq!(app.focus, Focus::SandboxList);
 }
@@ -1076,7 +1081,7 @@ async fn test_right_advances_tab_in_detail_focus() {
     let mut app = make_app();
     app.focus = Focus::Detail;
     handle_event(&mut app, key_press(KeyCode::Right));
-    assert_eq!(app.tab, DetailTab::Filesystem);
+    assert_eq!(app.tab, DetailTab::Metrics);
 }
 
 #[tokio::test]
@@ -1102,17 +1107,17 @@ fn test_left_does_nothing_in_list_focus() {
     assert_eq!(app.focus, Focus::SandboxList);
     handle_event(&mut app, key_press(KeyCode::Left));
     assert_eq!(app.focus, Focus::SandboxList);
-    assert_eq!(app.tab, DetailTab::Logs); // unchanged
+    assert_eq!(app.tab, DetailTab::Info); // unchanged
 }
 
 #[test]
 fn test_left_from_leftmost_tab_switches_focus_to_list() {
     let mut app = make_app();
     app.focus = Focus::Detail;
-    assert_eq!(app.tab, DetailTab::Logs); // leftmost tab
+    assert_eq!(app.tab, DetailTab::Info); // leftmost tab
     handle_event(&mut app, key_press(KeyCode::Left));
     assert_eq!(app.focus, Focus::SandboxList);
-    assert_eq!(app.tab, DetailTab::Logs); // tab itself is unchanged
+    assert_eq!(app.tab, DetailTab::Info); // tab itself is unchanged
 }
 
 #[tokio::test]
@@ -1403,8 +1408,8 @@ fn test_new_sandbox_slot_hidden_while_filter_active() {
 
 // ── handle_event: mouse support ──────────────────────────────────────────
 
-#[test]
-fn test_mouse_click_on_card_selects_it() {
+#[tokio::test]
+async fn test_mouse_click_on_card_selects_it() {
     let mut app = make_app();
     app.sandboxes.push(make_sandbox("box0", Status::Stopped));
     app.sandboxes.push(make_sandbox("box1", Status::Stopped));
@@ -1438,8 +1443,8 @@ async fn test_mouse_click_on_tab_switches_tab_and_focus() {
     assert_eq!(app.focus, Focus::Detail);
 }
 
-#[test]
-fn test_mouse_scroll_over_list_moves_selection() {
+#[tokio::test]
+async fn test_mouse_scroll_over_list_moves_selection() {
     let mut app = make_app();
     app.sandboxes.push(make_sandbox("box0", Status::Stopped));
     app.sandboxes.push(make_sandbox("box1", Status::Stopped));

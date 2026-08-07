@@ -192,9 +192,10 @@ impl Theme {
     }
 
     /// Section heading style (e.g. "General", "Timestamps" in the Info tab).
+    /// Plain bold text — no separate color/underline — so headings read as
+    /// structure, not as another accent color competing with real content.
     pub fn heading(&self) -> Style {
-        self.accent()
-            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        self.text_bold()
     }
 
     /// Panel/card title accent (secondary accent color, bold).

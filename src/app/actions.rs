@@ -262,7 +262,7 @@ pub(crate) fn on_sandbox_selected(app: &mut App) {
                 let path = app.fs_path.clone();
                 app.request_fs(&sb.name, &path);
             }
-            DetailTab::Info => app.request_metrics(&sb.name),
+            DetailTab::Metrics | DetailTab::Info => app.request_metrics(&sb.name),
         }
     }
 }
@@ -275,7 +275,7 @@ pub(crate) fn on_tab_switched(app: &mut App) {
                 let path = app.fs_path.clone();
                 app.request_fs(&sb.name, &path);
             }
-            DetailTab::Info => app.request_metrics(&sb.name),
+            DetailTab::Metrics | DetailTab::Info => app.request_metrics(&sb.name),
         }
     }
 }

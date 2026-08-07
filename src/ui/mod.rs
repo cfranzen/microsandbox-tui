@@ -8,6 +8,7 @@ mod filesystem;
 mod info;
 mod layout;
 mod logs;
+mod metrics;
 mod sandbox_list;
 mod util;
 mod volumes;

@@ -68,22 +68,29 @@ pub enum Focus {
 /// Tabs available in the detail panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetailTab {
+    Info,
+    Metrics,
     Logs,
     Filesystem,
-    Info,
 }
 
 impl DetailTab {
     pub fn title(self) -> &'static str {
         match self {
+            DetailTab::Info => "Info",
+            DetailTab::Metrics => "Metrics",
             DetailTab::Logs => "Logs",
             DetailTab::Filesystem => "Filesystem",
-            DetailTab::Info => "Info",
         }
     }
 
     pub fn all() -> &'static [DetailTab] {
-        &[DetailTab::Info, DetailTab::Logs, DetailTab::Filesystem]
+        &[
+            DetailTab::Info,
+            DetailTab::Metrics,
+            DetailTab::Logs,
+            DetailTab::Filesystem,
+        ]
     }
 }
 
@@ -496,7 +503,7 @@ pub async fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> 
                             let path = app.fs_path.clone();
                             app.request_fs(&sb.name, &path);
                         }
-                        DetailTab::Info => app.request_metrics(&sb.name),
+                        DetailTab::Metrics | DetailTab::Info => app.request_metrics(&sb.name),
                     }
                 }
             }

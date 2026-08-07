@@ -64,15 +64,16 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // sandbox name
+            Constraint::Length(1), // spacing
             Constraint::Length(1), // tab bar
             Constraint::Length(1), // separator
             Constraint::Min(0),    // tab content
         ])
         .split(inner);
 
-    render_tab_bar(f, app, splits[1]);
-    render_separator(f, app, splits[2]);
-    render_tab_content(f, app, splits[3]);
+    render_tab_bar(f, app, splits[2]);
+    render_separator(f, app, splits[3]);
+    render_tab_content(f, app, splits[4]);
 }
 
 fn render_tab_bar(f: &mut Frame, app: &mut App, area: Rect) {
@@ -80,7 +81,10 @@ fn render_tab_bar(f: &mut Frame, app: &mut App, area: Rect) {
     app.mouse.tab_rects.clear();
 
     let tabs = DetailTab::all();
-    let labels: Vec<(&str, bool)> = tabs.iter().map(|&tab| (tab.title(), tab == app.tab)).collect();
+    let labels: Vec<(&str, bool)> = tabs
+        .iter()
+        .map(|&tab| (tab.title(), tab == app.tab))
+        .collect();
     let (spans, widths) = theme.tab_bar(&labels);
 
     let mut x = area.x;
@@ -107,8 +111,9 @@ fn render_separator(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_tab_content(f: &mut Frame, app: &mut App, area: Rect) {
     match app.tab {
+        DetailTab::Info => super::info::render(f, app, area),
+        DetailTab::Metrics => super::metrics::render(f, app, area),
         DetailTab::Logs => super::logs::render(f, app, area),
         DetailTab::Filesystem => super::filesystem::render(f, app, area),
-        DetailTab::Info => super::info::render(f, app, area),
     }
 }

@@ -1,11 +1,10 @@
-//! Info tab: sandbox configuration, timestamps, and live metrics
-//! (CPU/memory/disk gauges with history sparklines, disk/network I/O, uptime).
+//! Info tab: sandbox configuration and timestamps.
 
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, Paragraph, Sparkline},
+    widgets::{Block, Padding, Paragraph},
     Frame,
 };
 
@@ -15,23 +14,39 @@ use crate::theme::Theme;
 
 use super::util::fmt_bytes;
 
+/// Left column width for key labels, e.g. `"Name"` padded to
+/// `"Name      "`. Centralized here so every row lines up without
+/// hand-counted spaces baked into each label string.
+const LABEL_WIDTH: usize = 12;
+
 pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let Some(sb) = app.selected_sandbox().cloned() else {
         return;
     };
 
-    // Split: config/timestamp block (fixed height) + live metrics (remaining space).
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(16), Constraint::Min(0)])
-        .split(area);
+    // Best-effort: if metrics for this sandbox were already fetched (e.g.
+    // the user visited the Metrics tab), reuse the cached snapshot to show
+    // uptime/disk capacity here too, without forcing a fetch from the Info
+    // tab.
+    let metrics = app.metrics.get(&sb.name).cloned();
 
-    render_config(f, &app.theme, &sb, chunks[0]);
-    render_metrics(f, app, &sb, chunks[1]);
+    // A single 1-character padded block gives the whole section consistent
+    // left/right/top margins instead of hand-inserted blanks in each label.
+    let block = Block::default().padding(Padding::new(1, 1, 1, 0));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    render_config(f, &app.theme, &sb, metrics.as_ref(), inner);
 }
 
-/// Render the general config + timestamps section (previously the "Info" tab).
-fn render_config(f: &mut Frame, theme: &Theme, sb: &crate::sandbox::SandboxInfo, area: Rect) {
+/// Render the General + Timestamps sections.
+fn render_config(
+    f: &mut Frame,
+    theme: &Theme,
+    sb: &crate::sandbox::SandboxInfo,
+    metrics: Option<&MetricsSnapshot>,
+    area: Rect,
+) {
     let key = theme.muted().add_modifier(Modifier::BOLD);
     let val = theme.text();
     let heading = theme.heading();
@@ -54,19 +69,40 @@ fn render_config(f: &mut Frame, theme: &Theme, sb: &crate::sandbox::SandboxInfo,
         .map(|t| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
         .unwrap_or_else(|| "—".into());
 
+    // "Age" (time since creation) and "Uptime" (time since the sandbox's
+    // guest process last started) both look like durations, so make each
+    // row's meaning explicit and keep uptime with the other timestamps.
+    let uptime = if sb.status == crate::sandbox::SandboxStatus::Running {
+        metrics
+            .map(|m| {
+                humantime::format_duration(std::time::Duration::from_secs(m.uptime_secs))
+                    .to_string()
+            })
+            .unwrap_or_else(|| "—".into())
+    } else {
+        "not running".into()
+    };
+
     let status_str = format!("{:?}", sb.status);
     let status_color = theme.status_color(sb.status);
 
     // Build strings before constructing Line values to avoid temporary lifetime issues.
     let cpus_str = sb.cpus.to_string();
     let memory_str = format!("{} MiB", sb.memory_mib);
+    let workdir_str = sb.workdir.clone().unwrap_or_else(|| "—".into());
+    let disk_capacity_str = metrics
+        .and_then(|m| match (m.disk_used_bytes, m.disk_free_bytes) {
+            (Some(used), Some(free)) => Some(fmt_bytes(used + free)),
+            _ => None,
+        })
+        .unwrap_or_else(|| "—".into());
 
     let lines: Vec<Line> = vec![
-        Line::from(Span::styled("  General", heading)),
+        Line::from(Span::styled("General", heading)),
         Line::raw(""),
-        kv("  Name       ", &sb.name, key, val),
+        kv("Name", &sb.name, key, val),
         Line::from(vec![
-            Span::styled("  Status     ", key),
+            Span::styled(label("Status"), key),
             Span::styled(
                 &status_str,
                 Style::default()
@@ -74,249 +110,32 @@ fn render_config(f: &mut Frame, theme: &Theme, sb: &crate::sandbox::SandboxInfo,
                     .add_modifier(Modifier::BOLD),
             ),
         ]),
-        kv("  Image      ", &sb.image, key, val),
-        kv("  CPUs       ", &cpus_str, key, val),
-        kv("  Memory     ", &memory_str, key, val),
+        kv("Image", &sb.image, key, val),
+        kv("Working dir", &workdir_str, key, val),
+        kv("CPUs", &cpus_str, key, val),
+        kv("Memory", &memory_str, key, val),
+        kv("Max disk", &disk_capacity_str, key, val),
         Line::raw(""),
-        Line::from(Span::styled("  Timestamps", heading)),
+        Line::from(Span::styled("Timestamps", heading)),
         Line::raw(""),
-        kv("  Created    ", &created, key, val),
-        kv("  Age        ", &age, key, val),
-        kv("  Updated    ", &updated, key, val),
-        Line::raw(""),
-        Line::from(Span::styled("  Metrics", heading)),
-        Line::raw(""),
+        kv("Created", &created, key, val),
+        kv("Updated", &updated, key, val),
+        kv("Age", &age, key, val),
+        kv("Uptime", &uptime, key, val),
     ];
 
     f.render_widget(Paragraph::new(lines), area);
 }
 
-/// Render the live metrics section (previously the "Metrics" tab).
-fn render_metrics(f: &mut Frame, app: &mut App, sb: &crate::sandbox::SandboxInfo, area: Rect) {
-    let theme = app.theme;
-    let name = sb.name.clone();
-    let is_running = sb.status == crate::sandbox::SandboxStatus::Running;
-
-    if !is_running {
-        f.render_widget(
-            Paragraph::new(Span::styled(
-                "Sandbox is not running. Start it to see live metrics.",
-                theme.muted(),
-            )),
-            area,
-        );
-        return;
-    }
-
-    let metrics = app.metrics.get(&name).cloned();
-
-    if metrics.is_none() {
-        app.request_metrics(&name);
-        f.render_widget(
-            Paragraph::new(Span::styled("Loading metrics…", theme.muted())),
-            area,
-        );
-        return;
-    }
-
-    let m = metrics.unwrap_or_default();
-    let history: Vec<MetricsSnapshot> = app
-        .metrics_history
-        .get(&name)
-        .map(|h| h.iter().cloned().collect())
-        .unwrap_or_default();
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // CPU gauge
-            Constraint::Length(4), // CPU history sparkline
-            Constraint::Length(3), // Memory gauge
-            Constraint::Length(4), // Memory history sparkline
-            Constraint::Length(3), // Disk usage gauge (writable overlay)
-            Constraint::Length(1), // Disk I/O
-            Constraint::Length(1), // Network I/O
-            Constraint::Length(1), // Uptime
-            Constraint::Min(0),    // padding
-        ])
-        .split(area);
-
-    // --- CPU gauge ---
-    let cpu_pct = m.cpu_percent.clamp(0.0, 100.0);
-    let cpu_color = theme.gauge_color(cpu_pct);
-    f.render_widget(
-        Gauge::default()
-            .block(
-                Block::default()
-                    .title(Span::styled(" CPU ", theme.text()))
-                    .borders(Borders::LEFT | Borders::TOP | Borders::RIGHT)
-                    .border_style(theme.muted()),
-            )
-            .gauge_style(Style::default().fg(cpu_color))
-            .percent(cpu_pct as u16)
-            .label(format!("{:.1}%", cpu_pct)),
-        chunks[0],
-    );
-
-    render_sparkline(
-        f,
-        &theme,
-        " CPU history ",
-        history
-            .iter()
-            .map(|s| s.cpu_percent.clamp(0.0, 100.0) as u64),
-        chunks[1],
-    );
-
-    // --- Memory gauge ---
-    let mem_total_mib = sb.memory_mib as u64;
-    let mem_used_mib = m.memory_bytes / 1_048_576;
-    let mem_pct = mem_used_mib
-        .checked_mul(100)
-        .and_then(|v| v.checked_div(mem_total_mib))
-        .unwrap_or(0)
-        .min(100);
-    let mem_color = theme.gauge_color(mem_pct as f64);
-    f.render_widget(
-        Gauge::default()
-            .block(
-                Block::default()
-                    .title(Span::styled(" Memory ", theme.text()))
-                    .borders(Borders::LEFT | Borders::TOP | Borders::RIGHT)
-                    .border_style(theme.muted()),
-            )
-            .gauge_style(Style::default().fg(mem_color))
-            .percent(mem_pct as u16)
-            .label(format!("{} / {} MiB", mem_used_mib, mem_total_mib)),
-        chunks[2],
-    );
-
-    render_sparkline(
-        f,
-        &theme,
-        " Memory history (MiB) ",
-        history
-            .iter()
-            .map(|s| s.memory_bytes / 1_048_576)
-            .collect::<Vec<_>>()
-            .into_iter(),
-        chunks[3],
-    );
-
-    // --- Disk usage gauge (writable overlay) ---
-    render_disk_usage(f, &theme, &m, chunks[4]);
-
-    // --- Disk I/O ---
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(" Disk I/O  ", theme.muted()),
-            Span::styled(
-                format!(
-                    "↑ {}  ↓ {}",
-                    fmt_bytes(m.disk_write_bytes),
-                    fmt_bytes(m.disk_read_bytes)
-                ),
-                theme.text(),
-            ),
-        ])),
-        chunks[5],
-    );
-
-    // --- Network I/O ---
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(" Net       ", theme.muted()),
-            Span::styled(
-                format!(
-                    "↑ {}  ↓ {}",
-                    fmt_bytes(m.net_tx_bytes),
-                    fmt_bytes(m.net_rx_bytes)
-                ),
-                theme.text(),
-            ),
-        ])),
-        chunks[6],
-    );
-
-    // --- Uptime ---
-    let uptime_str =
-        humantime::format_duration(std::time::Duration::from_secs(m.uptime_secs)).to_string();
-
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(" Uptime    ", theme.muted()),
-            Span::styled(format!(" {}", uptime_str), theme.text()),
-        ])),
-        chunks[7],
-    );
-}
-
-/// Render the writable-overlay disk usage gauge when the SDK reports it.
-/// Not every backend/config surfaces this, so we fall back to a plain hint.
-fn render_disk_usage(f: &mut Frame, theme: &Theme, m: &MetricsSnapshot, area: Rect) {
-    let block = Block::default()
-        .title(Span::styled(" Disk usage ", theme.text()))
-        .borders(Borders::LEFT | Borders::TOP | Borders::RIGHT)
-        .border_style(theme.muted());
-
-    match (m.disk_used_bytes, m.disk_free_bytes) {
-        (Some(used), Some(free)) => {
-            let total = used + free;
-            let pct = used
-                .checked_mul(100)
-                .and_then(|v| v.checked_div(total))
-                .unwrap_or(0)
-                .min(100);
-            let color = theme.gauge_color(pct as f64);
-            f.render_widget(
-                Gauge::default()
-                    .block(block)
-                    .gauge_style(Style::default().fg(color))
-                    .percent(pct as u16)
-                    .label(format!("{} / {} used", fmt_bytes(used), fmt_bytes(total))),
-                area,
-            );
-        }
-        _ => {
-            f.render_widget(
-                Paragraph::new(Span::styled(" not reported by this sandbox", theme.muted()))
-                    .block(block),
-                area,
-            );
-        }
-    }
-}
-
-/// Render a labelled sparkline of recent samples for one metric.
-fn render_sparkline(
-    f: &mut Frame,
-    theme: &Theme,
-    title: &str,
-    data: impl Iterator<Item = u64>,
-    area: Rect,
-) {
-    let samples: Vec<u64> = data.collect();
-    let block = Block::default()
-        .title(Span::styled(title.to_owned(), theme.muted()))
-        .borders(Borders::LEFT | Borders::RIGHT);
-
-    if samples.is_empty() {
-        f.render_widget(block, area);
-        return;
-    }
-
-    f.render_widget(
-        Sparkline::default()
-            .block(block)
-            .data(&samples)
-            .style(theme.accent()),
-        area,
-    );
-}
-
-fn kv<'a>(label: &'a str, value: &'a str, key_style: Style, val_style: Style) -> Line<'a> {
+/// Build a `"Label      value"` row with the label padded to
+/// [`LABEL_WIDTH`] columns.
+fn kv<'a>(label_text: &'a str, value: &'a str, key_style: Style, val_style: Style) -> Line<'a> {
     Line::from(vec![
-        Span::styled(label.to_owned(), key_style),
+        Span::styled(label(label_text), key_style),
         Span::styled(value.to_owned(), val_style),
     ])
+}
+
+fn label(text: &str) -> String {
+    format!("{text:<LABEL_WIDTH$}")
 }
