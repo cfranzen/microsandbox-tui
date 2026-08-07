@@ -8,20 +8,18 @@
 //! process — rather than in-process inside the TUI — is what lets it own a
 //! brand new terminal window's stdio.
 
-use anyhow::{bail, Context, Result};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use microsandbox::sandbox::exec::ExecSink;
-use microsandbox::{ExecEvent, ExecHandle, Sandbox};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use anyhow::{Context, Result};
+use microsandbox::Sandbox;
 
-/// How often the local terminal size is polled and, if changed, forwarded
-/// to the guest PTY. Cheap enough to poll rather than needing a
-/// platform-specific resize-signal handler on every OS.
-const RESIZE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(300);
-
-/// Connect to `sandbox_name`, run `sh -c <command>` with an allocated PTY,
-/// and forward the local terminal's stdin/stdout and size changes to it
-/// until the command exits.
+/// Connect to `sandbox_name` and attach an interactive `sh -c <command>`
+/// session to it, using the SDK's purpose-built interactive `attach` path —
+/// the same one `msb exec` uses — instead of hand-rolling PTY forwarding
+/// over the general-purpose streaming-exec API. `attach` reads the host
+/// terminal via a low-level, non-blocking fd (not the buffered
+/// `tokio::io::stdin()` wrapper) and forwards raw bytes verbatim, which is
+/// what makes multi-byte sequences like arrow-key history navigation work
+/// reliably; a hand-rolled forward loop over `exec_stream_with` was found to
+/// not forward those reliably.
 ///
 /// Returns the guest process's exit code, which the caller should use as
 /// this process's own exit code so the host terminal reflects success or
@@ -34,67 +32,14 @@ pub async fn run(sandbox_name: &str, command: &str) -> Result<i32> {
         .await
         .with_context(|| format!("connect to sandbox '{sandbox_name}'"))?;
 
-    let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
-    let mut handle = sandbox
-        .exec_stream_with("sh", |o| o.arg("-c").arg(command).stdin_pipe().tty(true))
+    // Forward the host's TERM (falling back to a sane default) so guest
+    // readline/ncurses-based programs can look up terminal capabilities.
+    let term = std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".to_owned());
+
+    let exit_code = sandbox
+        .attach_with("sh", |a| a.arg("-c").arg(command).env("TERM", term))
         .await
-        .context("start exec session")?;
-    let _ = handle.resize(rows, cols).await;
+        .context("attach exec session")?;
 
-    let stdin_sink = handle.take_stdin();
-
-    enable_raw_mode().context("enable raw mode")?;
-    let result = forward(&mut handle, stdin_sink).await;
-    let _ = disable_raw_mode();
-
-    result
-}
-
-/// Pump data between the local terminal and the guest PTY until the guest
-/// process exits, periodically syncing the PTY size to the local terminal.
-async fn forward(handle: &mut ExecHandle, stdin_sink: Option<ExecSink>) -> Result<i32> {
-    let mut stdin = tokio::io::stdin();
-    let mut stdout = tokio::io::stdout();
-    let mut input_buf = [0u8; 4096];
-    let mut last_size = crossterm::terminal::size().unwrap_or((80, 24));
-    let mut resize_tick = tokio::time::interval(RESIZE_POLL_INTERVAL);
-
-    loop {
-        tokio::select! {
-            n = stdin.read(&mut input_buf) => {
-                let n = n.context("read local stdin")?;
-                if n == 0 {
-                    if let Some(sink) = &stdin_sink {
-                        let _ = sink.close().await;
-                    }
-                    continue;
-                }
-                if let Some(sink) = &stdin_sink {
-                    let _ = sink.write(&input_buf[..n]).await;
-                }
-            }
-            event = handle.recv() => {
-                match event {
-                    Some(ExecEvent::Stdout(data)) | Some(ExecEvent::Stderr(data)) => {
-                        stdout.write_all(&data).await?;
-                        stdout.flush().await?;
-                    }
-                    Some(ExecEvent::Exited { code }) => return Ok(code),
-                    Some(ExecEvent::Failed(payload)) => {
-                        bail!("command failed to start: {payload:?}");
-                    }
-                    Some(ExecEvent::Started { .. }) | Some(ExecEvent::StdinError(_)) => {}
-                    None => return Ok(0),
-                }
-            }
-            _ = resize_tick.tick() => {
-                if let Ok(size) = crossterm::terminal::size() {
-                    if size != last_size {
-                        last_size = size;
-                        let _ = handle.resize(size.1, size.0).await;
-                    }
-                }
-            }
-        }
-    }
+    Ok(exit_code)
 }
