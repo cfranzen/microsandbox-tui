@@ -1354,3 +1354,4 @@ fn centred_rect(percent_width: u16, height: u16, area: Rect) -> Rect {
 
     horizontal[1]
 }
+
