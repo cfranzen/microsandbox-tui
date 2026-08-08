@@ -172,7 +172,56 @@ pub(crate) fn submit_create_dialog(app: &mut App) {
     };
 
     let disable_network = dlg.disable_network;
+    let default_ingress_action = dlg.default_ingress_action;
+    let default_egress_action = dlg.default_egress_action;
     let network_rules = dlg.network_rules.clone();
+    let dns_nameservers = match crate::sandbox::parse_nameservers(&dlg.dns_nameservers) {
+        Ok(v) => v,
+        Err(e) => {
+            app.create_dialog.error = Some(e.to_string());
+            return;
+        }
+    };
+    let dns_query_timeout_ms = match dlg.dns_query_timeout_ms.trim().parse::<u64>() {
+        Ok(v) => v,
+        Err(_) => {
+            app.create_dialog.error = Some("DNS timeout must be a number".into());
+            return;
+        }
+    };
+    let dns_rebind_protection = dlg.dns_rebind_protection;
+    let tls_intercepted_ports = match crate::sandbox::parse_ports_csv(&dlg.tls_intercepted_ports) {
+        Ok(v) => v,
+        Err(e) => {
+            app.create_dialog.error = Some(e.to_string());
+            return;
+        }
+    };
+    let tls_enabled = dlg.tls_enabled;
+    let tls_bypass_patterns = dlg
+        .tls_bypass_patterns
+        .split(',')
+        .map(str::trim)
+        .filter(|s: &&str| !s.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
+    let tls_verify_upstream = dlg.tls_verify_upstream;
+    let tls_block_quic = dlg.tls_block_quic;
+    let violation_action = dlg.violation_action;
+    let violation_passthrough_hosts = dlg
+        .violation_passthrough_hosts
+        .split(',')
+        .map(str::trim)
+        .filter(|s: &&str| !s.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
+    let violation_passthrough_patterns = dlg
+        .violation_passthrough_patterns
+        .split(',')
+        .map(str::trim)
+        .filter(|s: &&str| !s.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
     let secrets = dlg.secrets.clone();
     let mounts = merge_workdir_mount(dlg.mounts.clone(), workdir_mount);
 
@@ -194,9 +243,22 @@ pub(crate) fn submit_create_dialog(app: &mut App) {
             max_cpus,
             max_memory_mib: max_memory,
             disable_network,
+            default_ingress_action,
+            default_egress_action,
             network_rules,
+            dns_nameservers,
+            dns_query_timeout_ms,
+            dns_rebind_protection,
             secrets,
             mounts,
+            tls_enabled,
+            tls_bypass_patterns,
+            tls_intercepted_ports,
+            tls_verify_upstream,
+            tls_block_quic,
+            violation_action,
+            violation_passthrough_hosts,
+            violation_passthrough_patterns,
         };
         let result = crate::sandbox::create_sandbox(&cfg).await;
         let (msg, is_err) = match result {

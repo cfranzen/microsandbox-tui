@@ -8,7 +8,7 @@
 use crate::config::AppConfig;
 use crate::sandbox::{
     NetRuleAction, NetRuleDestGroup, NetRuleDestKind, NetRuleDirection, NetRuleProtocol,
-    NetworkRule, SecretConfig, VolumeInfo, VolumeMountConfig,
+    NetworkRule, SecretConfig, ViolationActionChoice, VolumeInfo, VolumeMountConfig,
 };
 
 /// Which tab of the "create new sandbox" dialog is active.
@@ -18,7 +18,7 @@ pub enum DialogTab {
     Basic,
     GuestOs,
     Network,
-    Secrets,
+    Security,
 }
 
 impl DialogTab {
@@ -26,7 +26,7 @@ impl DialogTab {
         DialogTab::Basic,
         DialogTab::GuestOs,
         DialogTab::Network,
-        DialogTab::Secrets,
+        DialogTab::Security,
     ];
 
     pub fn next(self) -> Self {
@@ -44,7 +44,7 @@ impl DialogTab {
             DialogTab::Basic => "Basic",
             DialogTab::GuestOs => "Guest OS",
             DialogTab::Network => "Network",
-            DialogTab::Secrets => "Secrets",
+            DialogTab::Security => "Security",
         }
     }
 }
@@ -476,9 +476,8 @@ pub struct CreateDialog {
     pub max_memory: String,
     pub workdir: String,
 
-    // ── Guest OS tab (fields 0-4) ────────────────────────────────────────
+    // ── Guest OS tab (fields 0-3) ────────────────────────────────────────
     pub hostname: String,
-    pub user: String,
     pub shell: String,
     /// Environment variables (key, value), listed inline in the tab.
     pub env_vars: Vec<(String, String)>,
@@ -488,8 +487,10 @@ pub struct CreateDialog {
     pub mounts: Vec<VolumeMountConfig>,
     pub mounts_selected: usize,
 
-    // ── Network tab (fields 0-2) ─────────────────────────────────────────
+    // ── Network tab ───────────────────────────────────────────────────────
     pub disable_network: bool,
+    pub default_ingress_action: NetRuleAction,
+    pub default_egress_action: NetRuleAction,
     /// Port mappings (host, guest), listed inline in the tab.
     pub ports: Vec<(u16, u16)>,
     pub ports_selected: usize,
@@ -497,8 +498,20 @@ pub struct CreateDialog {
     /// time only — the SDK has no API for changing policy afterwards.
     pub network_rules: Vec<NetworkRule>,
     pub network_rules_selected: usize,
+    pub dns_nameservers: String,
+    pub dns_query_timeout_ms: String,
+    pub dns_rebind_protection: bool,
 
-    // ── Secrets tab (field 0) ────────────────────────────────────────────
+    // ── Security tab ──────────────────────────────────────────────────────
+    pub user: String,
+    pub tls_enabled: bool,
+    pub tls_bypass_patterns: String,
+    pub tls_intercepted_ports: String,
+    pub tls_verify_upstream: bool,
+    pub tls_block_quic: bool,
+    pub violation_action: ViolationActionChoice,
+    pub violation_passthrough_hosts: String,
+    pub violation_passthrough_patterns: String,
     /// Secrets injected via the TLS proxy, listed inline in the tab.
     pub secrets: Vec<SecretConfig>,
     pub secrets_selected: usize,
@@ -527,6 +540,11 @@ impl CreateDialog {
             cpus: "1".into(),
             memory: "512".into(),
             shell: "/bin/sh".into(),
+            dns_query_timeout_ms: "5000".into(),
+            dns_rebind_protection: true,
+            tls_intercepted_ports: "443".into(),
+            tls_verify_upstream: true,
+            tls_block_quic: true,
             ..Default::default()
         }
     }
@@ -565,9 +583,9 @@ impl CreateDialog {
     pub fn form_field_count(&self) -> usize {
         match self.tab {
             DialogTab::Basic => 7, // name image cpus max_cpus memory max_memory workdir
-            DialogTab::GuestOs => 5, // hostname user shell env_vars mounts
-            DialogTab::Network => 3, // no_net ports net_rules
-            DialogTab::Secrets => 1, // secrets
+            DialogTab::GuestOs => 4,
+            DialogTab::Network => 7,
+            DialogTab::Security => 10,
         }
     }
 
@@ -623,11 +641,22 @@ impl CreateDialog {
             },
             DialogTab::GuestOs => match self.field {
                 0 => Some(&mut self.hostname),
-                1 => Some(&mut self.user),
-                2 => Some(&mut self.shell),
-                _ => None, // env_vars / mounts — inline lists
+                1 => Some(&mut self.shell),
+                _ => None,
             },
-            DialogTab::Network | DialogTab::Secrets => None,
+            DialogTab::Network => match self.field {
+                5 => Some(&mut self.dns_nameservers),
+                6 => Some(&mut self.dns_query_timeout_ms),
+                _ => None,
+            },
+            DialogTab::Security => match self.field {
+                0 => Some(&mut self.user),
+                2 => Some(&mut self.tls_bypass_patterns),
+                3 => Some(&mut self.tls_intercepted_ports),
+                7 => Some(&mut self.violation_passthrough_hosts),
+                8 => Some(&mut self.violation_passthrough_patterns),
+                _ => None,
+            },
         }
     }
 
@@ -636,12 +665,17 @@ impl CreateDialog {
         if self.is_create_focused() {
             return false;
         }
-        self.tab == DialogTab::Basic && matches!(self.field, 2 | 3 | 4 | 5)
+        (self.tab == DialogTab::Basic && matches!(self.field, 2 | 3 | 4 | 5))
+            || (self.tab == DialogTab::Network && self.field == 6)
     }
 
     /// True when the focused field is a boolean toggle activated by Space.
     pub fn is_toggle_field(&self) -> bool {
-        !self.is_create_focused() && self.tab == DialogTab::Network && self.field == 0
+        !self.is_create_focused()
+            && matches!(
+                (self.tab, self.field),
+                (DialogTab::Network, 0 | 1 | 2 | 4) | (DialogTab::Security, 1 | 4 | 5 | 6)
+            )
     }
 
     /// Returns the inline list identified by the currently focused field,
@@ -651,11 +685,11 @@ impl CreateDialog {
             return None;
         }
         match (self.tab, self.field) {
-            (DialogTab::GuestOs, 3) => Some(ListField::EnvVars),
-            (DialogTab::GuestOs, 4) => Some(ListField::Mounts),
-            (DialogTab::Network, 1) => Some(ListField::Ports),
-            (DialogTab::Network, 2) => Some(ListField::NetworkRules),
-            (DialogTab::Secrets, 0) => Some(ListField::Secrets),
+            (DialogTab::GuestOs, 2) => Some(ListField::EnvVars),
+            (DialogTab::GuestOs, 3) => Some(ListField::Mounts),
+            (DialogTab::Network, 3) => Some(ListField::Ports),
+            (DialogTab::Network, 4) => Some(ListField::NetworkRules),
+            (DialogTab::Security, 9) => Some(ListField::Secrets),
             _ => None,
         }
     }

@@ -7,7 +7,9 @@ use futures::Stream;
 use microsandbox::logs::{LogStreamOptions, LogStreamStart};
 use microsandbox::sandbox::{FsEntryKind, LogEntry, LogOptions, LogSource, MAX_SANDBOX_LIST_LIMIT};
 use microsandbox::{MicrosandboxError, NetworkPolicy, Sandbox, SandboxMetrics, Volume, VolumeKind};
-use microsandbox_network::policy::DestinationGroup as SdkDestGroup;
+use microsandbox_network::dns::Nameserver;
+use microsandbox_network::policy::{Action as SdkAction, DestinationGroup as SdkDestGroup};
+use microsandbox_network::secrets::config::{HostPattern as SdkHostPattern, ViolationAction};
 use microsandbox_types::VolumeMount;
 
 // Re-export for use in other modules
@@ -465,6 +467,32 @@ pub struct SecretConfig {
     pub require_tls_identity: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ViolationActionChoice {
+    Block,
+    #[default]
+    BlockAndLog,
+    BlockAndTerminate,
+}
+
+impl ViolationActionChoice {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Block => "BLOCK",
+            Self::BlockAndLog => "BLOCK+LOG",
+            Self::BlockAndTerminate => "BLOCK+TERM",
+        }
+    }
+
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::Block => Self::BlockAndLog,
+            Self::BlockAndLog => Self::BlockAndTerminate,
+            Self::BlockAndTerminate => Self::Block,
+        }
+    }
+}
+
 impl SecretConfig {
     /// One-line human-readable summary shown in the create-dialog's
     /// secrets list.
@@ -498,12 +526,25 @@ pub struct CreateConfig {
     pub max_cpus: Option<u8>,
     pub max_memory_mib: Option<u32>,
     pub disable_network: bool,
+    pub default_ingress_action: NetRuleAction,
+    pub default_egress_action: NetRuleAction,
     /// Network policy rules applied at creation time. Ignored (with
     /// `disable_network` taking precedence) when empty.
     pub network_rules: Vec<NetworkRule>,
+    pub dns_nameservers: Vec<Nameserver>,
+    pub dns_query_timeout_ms: u64,
+    pub dns_rebind_protection: bool,
     /// Volume mounts applied at creation time. Existing sandboxes cannot
     /// have their mounts changed post-creation per the current SDK.
     pub mounts: Vec<VolumeMountConfig>,
+    pub tls_enabled: bool,
+    pub tls_bypass_patterns: Vec<String>,
+    pub tls_intercepted_ports: Vec<u16>,
+    pub tls_verify_upstream: bool,
+    pub tls_block_quic: bool,
+    pub violation_action: ViolationActionChoice,
+    pub violation_passthrough_hosts: Vec<String>,
+    pub violation_passthrough_patterns: Vec<String>,
     /// Secrets injected at creation time via the TLS proxy.
     pub secrets: Vec<SecretConfig>,
 }
@@ -617,9 +658,65 @@ pub async fn remove_sandbox(name: &str) -> Result<()> {
 /// Propagates the first [`microsandbox_network::policy::BuildError`]
 /// encountered (e.g. an ICMP protocol on an ingress-direction rule) as an
 /// `anyhow` error rather than silently discarding the user's rules.
-fn build_network_policy(rules: &[NetworkRule]) -> Result<NetworkPolicy> {
-    let mut builder = NetworkPolicy::builder().default_allow();
-    for rule in rules {
+fn sdk_action(action: NetRuleAction) -> SdkAction {
+    match action {
+        NetRuleAction::Allow => SdkAction::Allow,
+        NetRuleAction::Deny => SdkAction::Deny,
+    }
+}
+
+fn parse_csv_list(input: &str) -> Vec<String> {
+    input
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+pub fn parse_nameservers(input: &str) -> Result<Vec<Nameserver>> {
+    parse_csv_list(input)
+        .into_iter()
+        .map(|item| {
+            item.parse::<Nameserver>()
+                .map_err(|e| anyhow::anyhow!("invalid nameserver '{item}': {e}"))
+        })
+        .collect()
+}
+
+pub fn parse_ports_csv(input: &str) -> Result<Vec<u16>> {
+    parse_csv_list(input)
+        .into_iter()
+        .map(|item| {
+            item.parse::<u16>()
+                .map_err(|_| anyhow::anyhow!("invalid port '{item}'"))
+        })
+        .collect()
+}
+
+fn build_violation_action(
+    choice: ViolationActionChoice,
+    hosts: &[String],
+    patterns: &[String],
+) -> ViolationAction {
+    if !hosts.is_empty() || !patterns.is_empty() {
+        let mut allowed = Vec::new();
+        allowed.extend(hosts.iter().cloned().map(SdkHostPattern::Exact));
+        allowed.extend(patterns.iter().cloned().map(SdkHostPattern::Wildcard));
+        return ViolationAction::Passthrough(allowed);
+    }
+    match choice {
+        ViolationActionChoice::Block => ViolationAction::Block,
+        ViolationActionChoice::BlockAndLog => ViolationAction::BlockAndLog,
+        ViolationActionChoice::BlockAndTerminate => ViolationAction::BlockAndTerminate,
+    }
+}
+
+fn build_network_policy(cfg: &CreateConfig) -> Result<NetworkPolicy> {
+    let mut builder = NetworkPolicy::builder()
+        .default_egress(sdk_action(cfg.default_egress_action))
+        .default_ingress(sdk_action(cfg.default_ingress_action));
+    for rule in &cfg.network_rules {
         let rule = rule.clone();
         builder = builder.rule(move |r| {
             match rule.direction {
@@ -709,9 +806,56 @@ pub async fn create_sandbox(cfg: &CreateConfig) -> Result<()> {
     }
     if cfg.disable_network {
         builder = builder.disable_network();
-    } else if !cfg.network_rules.is_empty() {
-        let policy = build_network_policy(&cfg.network_rules)?;
-        builder = builder.network(|n| n.policy(policy));
+    } else {
+        let policy = build_network_policy(cfg)?;
+        builder = builder.network(|n| {
+            let mut n = n
+                .policy(policy)
+                .dns(|d| {
+                    d.nameservers(cfg.dns_nameservers.clone())
+                        .query_timeout_ms(cfg.dns_query_timeout_ms)
+                        .rebind_protection(cfg.dns_rebind_protection)
+                })
+                .on_secret_violation(|v| {
+                    let action = build_violation_action(
+                        cfg.violation_action,
+                        &cfg.violation_passthrough_hosts,
+                        &cfg.violation_passthrough_patterns,
+                    );
+                    match action {
+                        ViolationAction::Block => v.block(),
+                        ViolationAction::BlockAndLog => v.block_and_log(),
+                        ViolationAction::BlockAndTerminate => v.block_and_terminate(),
+                        ViolationAction::Passthrough(hosts) => {
+                            let mut v = v;
+                            for host in hosts {
+                                v = match host {
+                                    SdkHostPattern::Exact(host) => v.passthrough_host(host),
+                                    SdkHostPattern::Wildcard(pattern) => {
+                                        v.passthrough_host_pattern(pattern)
+                                    }
+                                    SdkHostPattern::Any => v,
+                                };
+                            }
+                            v
+                        }
+                    }
+                });
+            if cfg.tls_enabled {
+                n = n.tls(|t| {
+                    let mut t = t
+                        .intercepted_ports(cfg.tls_intercepted_ports.clone())
+                        .verify_upstream(cfg.tls_verify_upstream)
+                        .block_quic(cfg.tls_block_quic);
+                    for pattern in &cfg.tls_bypass_patterns {
+                        t = t.bypass(pattern.clone());
+                    }
+                    // CA path and scoped overrides are not exposed in the TUI yet.
+                    t
+                });
+            }
+            n
+        });
     }
 
     for mount in &cfg.mounts {
@@ -1221,7 +1365,38 @@ mod tests {
 
     #[test]
     fn test_build_network_policy_empty_is_allow_all() {
-        let policy = build_network_policy(&[]).expect("build should succeed");
+        let policy = build_network_policy(&CreateConfig {
+            name: "x".into(),
+            image: "alpine".into(),
+            cpus: 1,
+            memory_mib: 512,
+            ports: vec![],
+            env_vars: vec![],
+            hostname: None,
+            workdir: None,
+            user: None,
+            shell: None,
+            max_cpus: None,
+            max_memory_mib: None,
+            disable_network: false,
+            default_ingress_action: NetRuleAction::Allow,
+            default_egress_action: NetRuleAction::Allow,
+            network_rules: vec![],
+            dns_nameservers: vec![],
+            dns_query_timeout_ms: 5000,
+            dns_rebind_protection: true,
+            mounts: vec![],
+            tls_enabled: false,
+            tls_bypass_patterns: vec![],
+            tls_intercepted_ports: vec![443],
+            tls_verify_upstream: true,
+            tls_block_quic: true,
+            violation_action: ViolationActionChoice::BlockAndLog,
+            violation_passthrough_hosts: vec![],
+            violation_passthrough_patterns: vec![],
+            secrets: vec![],
+        })
+        .expect("build should succeed");
         let allow_all = NetworkPolicy::allow_all();
         assert_eq!(policy.default_egress, allow_all.default_egress);
         assert_eq!(policy.default_ingress, allow_all.default_ingress);
@@ -1238,7 +1413,17 @@ mod tests {
                 NetRuleDirection::Ingress,
             ),
         ];
-        let policy = build_network_policy(&rules).expect("build should succeed");
+        let policy = build_network_policy(&CreateConfig {
+            name: "x".into(), image: "alpine".into(), cpus: 1, memory_mib: 512, ports: vec![],
+            env_vars: vec![], hostname: None, workdir: None, user: None, shell: None,
+            max_cpus: None, max_memory_mib: None, disable_network: false,
+            default_ingress_action: NetRuleAction::Allow, default_egress_action: NetRuleAction::Allow,
+            network_rules: rules, dns_nameservers: vec![], dns_query_timeout_ms: 5000,
+            dns_rebind_protection: true, mounts: vec![], tls_enabled: false,
+            tls_bypass_patterns: vec![], tls_intercepted_ports: vec![443], tls_verify_upstream: true,
+            tls_block_quic: true, violation_action: ViolationActionChoice::BlockAndLog,
+            violation_passthrough_hosts: vec![], violation_passthrough_patterns: vec![], secrets: vec![],
+        }).expect("build should succeed");
         assert_eq!(policy.rules.len(), 2);
     }
 
@@ -1253,7 +1438,17 @@ mod tests {
             protocols: vec![NetRuleProtocol::Tcp],
             port_range: Some((443, 443)),
         }];
-        let policy = build_network_policy(&rules).expect("build should succeed");
+        let policy = build_network_policy(&CreateConfig {
+            name: "x".into(), image: "alpine".into(), cpus: 1, memory_mib: 512, ports: vec![],
+            env_vars: vec![], hostname: None, workdir: None, user: None, shell: None,
+            max_cpus: None, max_memory_mib: None, disable_network: false,
+            default_ingress_action: NetRuleAction::Allow, default_egress_action: NetRuleAction::Allow,
+            network_rules: rules, dns_nameservers: vec![], dns_query_timeout_ms: 5000,
+            dns_rebind_protection: true, mounts: vec![], tls_enabled: false,
+            tls_bypass_patterns: vec![], tls_intercepted_ports: vec![443], tls_verify_upstream: true,
+            tls_block_quic: true, violation_action: ViolationActionChoice::BlockAndLog,
+            violation_passthrough_hosts: vec![], violation_passthrough_patterns: vec![], secrets: vec![],
+        }).expect("build should succeed");
         assert_eq!(policy.rules.len(), 1);
     }
 
@@ -1268,7 +1463,48 @@ mod tests {
             protocols: vec![NetRuleProtocol::Icmpv4],
             port_range: None,
         }];
-        assert!(build_network_policy(&rules).is_err());
+        let cfg = CreateConfig {
+            name: "x".into(), image: "alpine".into(), cpus: 1, memory_mib: 512, ports: vec![],
+            env_vars: vec![], hostname: None, workdir: None, user: None, shell: None,
+            max_cpus: None, max_memory_mib: None, disable_network: false,
+            default_ingress_action: NetRuleAction::Allow, default_egress_action: NetRuleAction::Allow,
+            network_rules: rules, dns_nameservers: vec![], dns_query_timeout_ms: 5000,
+            dns_rebind_protection: true, mounts: vec![], tls_enabled: false,
+            tls_bypass_patterns: vec![], tls_intercepted_ports: vec![443], tls_verify_upstream: true,
+            tls_block_quic: true, violation_action: ViolationActionChoice::BlockAndLog,
+            violation_passthrough_hosts: vec![], violation_passthrough_patterns: vec![], secrets: vec![],
+        };
+        assert!(build_network_policy(&cfg).is_err());
+    }
+
+    #[test]
+    fn test_parse_nameservers_accepts_csv() {
+        let parsed = parse_nameservers("1.1.1.1, dns.google:53").unwrap();
+        assert_eq!(parsed.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_ports_csv_accepts_csv() {
+        let parsed = parse_ports_csv("443,8443").unwrap();
+        assert_eq!(parsed, vec![443, 8443]);
+    }
+
+    #[test]
+    fn test_build_network_policy_uses_default_actions() {
+        let cfg = CreateConfig {
+            name: "x".into(), image: "alpine".into(), cpus: 1, memory_mib: 512, ports: vec![],
+            env_vars: vec![], hostname: None, workdir: None, user: None, shell: None,
+            max_cpus: None, max_memory_mib: None, disable_network: false,
+            default_ingress_action: NetRuleAction::Deny, default_egress_action: NetRuleAction::Allow,
+            network_rules: vec![], dns_nameservers: vec![], dns_query_timeout_ms: 5000,
+            dns_rebind_protection: true, mounts: vec![], tls_enabled: false,
+            tls_bypass_patterns: vec![], tls_intercepted_ports: vec![443], tls_verify_upstream: true,
+            tls_block_quic: true, violation_action: ViolationActionChoice::BlockAndLog,
+            violation_passthrough_hosts: vec![], violation_passthrough_patterns: vec![], secrets: vec![],
+        };
+        let policy = build_network_policy(&cfg).unwrap();
+        assert_eq!(policy.default_ingress, SdkAction::Deny);
+        assert_eq!(policy.default_egress, SdkAction::Allow);
     }
 
     // ── SecretConfig ─────────────────────────────────────────────────────────

@@ -51,7 +51,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             LIST_HEIGHT,  // ports
             LIST_HEIGHT,  // network rules
         ],
-        DialogTab::Secrets => &[
+        DialogTab::Security => &[
             LIST_HEIGHT, // secrets
         ],
     };
@@ -188,7 +188,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 chunks[4],
             );
         }
-        DialogTab::Secrets => {
+        DialogTab::Security => {
             render_list_field(
                 f,
                 theme,
@@ -269,7 +269,7 @@ fn render_tab_bar(f: &mut Frame, theme: &Theme, tab: DialogTab, area: Rect) {
         (DialogTab::Basic.title(), tab == DialogTab::Basic),
         (DialogTab::GuestOs.title(), tab == DialogTab::GuestOs),
         (DialogTab::Network.title(), tab == DialogTab::Network),
-        (DialogTab::Secrets.title(), tab == DialogTab::Secrets),
+        (DialogTab::Security.title(), tab == DialogTab::Security),
     ];
     let (spans, _) = theme.tab_bar(&labels);
 
