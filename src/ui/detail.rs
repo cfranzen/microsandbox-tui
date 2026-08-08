@@ -81,9 +81,9 @@ fn render_tab_bar(f: &mut Frame, app: &mut App, area: Rect) {
     app.mouse.tab_rects.clear();
 
     let tabs = DetailTab::all();
-    let labels: Vec<(&str, bool)> = tabs
+    let labels: Vec<(&str, bool, bool)> = tabs
         .iter()
-        .map(|&tab| (tab.title(), tab == app.tab))
+        .map(|&tab| (tab.title(), tab == app.tab, false))
         .collect();
     let (spans, widths) = theme.tab_bar(&labels);
 

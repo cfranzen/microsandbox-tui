@@ -76,8 +76,8 @@ pub enum NetRuleAction {
 impl NetRuleAction {
     pub fn label(self) -> &'static str {
         match self {
-            NetRuleAction::Allow => "ALLOW",
-            NetRuleAction::Deny => "DENY",
+            NetRuleAction::Allow => "Allow",
+            NetRuleAction::Deny => "Deny",
         }
     }
 
@@ -1334,8 +1334,8 @@ mod tests {
 
     #[test]
     fn test_net_rule_action_label() {
-        assert_eq!(NetRuleAction::Allow.label(), "ALLOW");
-        assert_eq!(NetRuleAction::Deny.label(), "DENY");
+        assert_eq!(NetRuleAction::Allow.label(), "Allow");
+        assert_eq!(NetRuleAction::Deny.label(), "Deny");
     }
 
     #[test]

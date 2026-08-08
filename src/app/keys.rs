@@ -334,6 +334,14 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                     move_list_selection(app, list, 1);
                     return;
                 }
+                KeyCode::Left => {
+                    move_list_column(app, list, -1);
+                    return;
+                }
+                KeyCode::Right => {
+                    move_list_column(app, list, 1);
+                    return;
+                }
                 KeyCode::Char('a') | KeyCode::Char('A') => {
                     open_list_add_dialog(app, list);
                     return;
@@ -389,45 +397,25 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                     app.create_dialog.dns_rebind_protection =
                         !app.create_dialog.dns_rebind_protection;
                 }
-                (DialogTab::Security, 1) => {
+                (DialogTab::Tls, 0) => {
                     app.create_dialog.tls_enabled = !app.create_dialog.tls_enabled;
                 }
-                (DialogTab::Security, 4) => {
+                (DialogTab::Tls, 3) => {
                     app.create_dialog.tls_verify_upstream = !app.create_dialog.tls_verify_upstream;
                 }
-                (DialogTab::Security, 5) => {
+                (DialogTab::Tls, 4) => {
                     app.create_dialog.tls_block_quic = !app.create_dialog.tls_block_quic;
+                }
+                (DialogTab::Security, 1) => {
+                    app.create_dialog.violation_action = app.create_dialog.violation_action.cycle();
                 }
                 _ => {}
             }
             app.create_dialog.error = None;
         }
-        KeyCode::Left | KeyCode::Right if !app.create_dialog.is_create_focused() => {
-            if app
-                .create_dialog
-                .field_disabled_by_network(app.create_dialog.tab, app.create_dialog.field)
-            {
-                let tab = if code == KeyCode::Left {
-                    app.create_dialog.tab.prev()
-                } else {
-                    app.create_dialog.tab.next()
-                };
-                app.create_dialog.switch_tab(tab);
-                return;
-            }
-            match (app.create_dialog.tab, app.create_dialog.field) {
-                (DialogTab::Security, 6) => {
-                    app.create_dialog.violation_action = app.create_dialog.violation_action.cycle();
-                }
-                _ => {
-                    let tab = if code == KeyCode::Left {
-                        app.create_dialog.tab.prev()
-                    } else {
-                        app.create_dialog.tab.next()
-                    };
-                    app.create_dialog.switch_tab(tab);
-                }
-            }
+        KeyCode::Left | KeyCode::Right => {
+            let tab = app.create_dialog.next_enabled_tab(code == KeyCode::Right);
+            app.create_dialog.switch_tab(tab);
             app.create_dialog.error = None;
         }
         KeyCode::Enter => {
@@ -577,6 +565,40 @@ fn move_list_selection(app: &mut App, list: ListField, delta: i32) {
             move_sel(&mut dlg.network_rules_selected, dlg.network_rules.len(), delta)
         }
         ListField::Secrets => move_sel(&mut dlg.secrets_selected, dlg.secrets.len(), delta),
+    }
+}
+
+/// Jumps the selection cursor of the given inline list one column left or
+/// right (`delta` -1/+1), for lists rendered in multiple columns (see
+/// `ui::create_dialog::render_list_field`). Landing row within the target
+/// column is kept the same as the current row where possible.
+fn move_list_column(app: &mut App, list: ListField, delta: i32) {
+    let rows = crate::ui::create_dialog::list_column_rows(list);
+
+    fn move_col(selected: &mut usize, len: usize, rows: usize, delta: i32) {
+        if len == 0 || rows == 0 {
+            return;
+        }
+        let cur_col = *selected / rows;
+        let row_in_col = *selected % rows;
+        let total_cols = (len + rows - 1) / rows;
+        let new_col = if delta < 0 {
+            cur_col.saturating_sub(1)
+        } else {
+            (cur_col + 1).min(total_cols.saturating_sub(1))
+        };
+        *selected = (new_col * rows + row_in_col).min(len - 1);
+    }
+
+    let dlg = &mut app.create_dialog;
+    match list {
+        ListField::EnvVars => move_col(&mut dlg.env_vars_selected, dlg.env_vars.len(), rows, delta),
+        ListField::Mounts => move_col(&mut dlg.mounts_selected, dlg.mounts.len(), rows, delta),
+        ListField::Ports => move_col(&mut dlg.ports_selected, dlg.ports.len(), rows, delta),
+        ListField::NetworkRules => {
+            move_col(&mut dlg.network_rules_selected, dlg.network_rules.len(), rows, delta)
+        }
+        ListField::Secrets => move_col(&mut dlg.secrets_selected, dlg.secrets.len(), rows, delta),
     }
 }
 
@@ -905,12 +927,12 @@ fn handle_net_rule_add_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
             app.create_dialog.net_rule_add.add_field =
                 (field + NetRuleAddDialog::FIELD_COUNT - 1) % NetRuleAddDialog::FIELD_COUNT;
         }
-        KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if field == 0 => {
+        KeyCode::Char(' ') if field == 0 => {
             let dlg = &mut app.create_dialog.net_rule_add;
             dlg.action = dlg.action.cycle();
             dlg.error = None;
         }
-        KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if field == 1 => {
+        KeyCode::Char(' ') if field == 1 => {
             let dlg = &mut app.create_dialog.net_rule_add;
             dlg.direction = dlg.direction.cycle();
             dlg.error = None;
@@ -1067,14 +1089,16 @@ fn handle_mount_add_key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
             let f = app.create_dialog.mount_add.add_field;
             app.create_dialog.mount_add.add_field = if f == 0 { 2 } else { f - 1 };
         }
-        KeyCode::Char('b') | KeyCode::Char('B') if app.create_dialog.mount_add.add_field == 0 => {
-            app.create_dialog.mount_add.kind = MountKindChoice::Bind;
-            app.create_dialog.mount_add.error = None;
-        }
-        KeyCode::Char('n') | KeyCode::Char('N') if app.create_dialog.mount_add.add_field == 0 => {
-            app.create_dialog.mount_add.kind = MountKindChoice::Named;
-            app.create_dialog.mount_add.sync_selected_volume_from_source();
-            app.create_dialog.mount_add.error = None;
+        KeyCode::Char(' ') if app.create_dialog.mount_add.add_field == 0 => {
+            let dlg = &mut app.create_dialog.mount_add;
+            dlg.kind = match dlg.kind {
+                MountKindChoice::Bind => MountKindChoice::Named,
+                MountKindChoice::Named => MountKindChoice::Bind,
+            };
+            if dlg.kind == MountKindChoice::Named {
+                dlg.sync_selected_volume_from_source();
+            }
+            dlg.error = None;
         }
         KeyCode::Char('f')
             if mods.contains(KeyModifiers::CONTROL)

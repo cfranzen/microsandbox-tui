@@ -795,10 +795,11 @@ fn test_dialog_tab_cycle_order() {
     assert_eq!(DialogTab::Basic.next(), DialogTab::GuestOs);
     assert_eq!(DialogTab::GuestOs.next(), DialogTab::Network);
     assert_eq!(DialogTab::Network.next(), DialogTab::Dns);
-    assert_eq!(DialogTab::Dns.next(), DialogTab::Security);
+    assert_eq!(DialogTab::Dns.next(), DialogTab::Tls);
+    assert_eq!(DialogTab::Tls.next(), DialogTab::Security);
     assert_eq!(DialogTab::Security.next(), DialogTab::Basic);
     assert_eq!(DialogTab::Basic.prev(), DialogTab::Security);
-    assert_eq!(DialogTab::Security.prev(), DialogTab::Dns);
+    assert_eq!(DialogTab::Security.prev(), DialogTab::Tls);
 }
 
 #[test]
@@ -809,6 +810,33 @@ fn test_dialog_space_toggles_disable_network() {
     app.create_dialog.field = 0;
     handle_event(&mut app, key_press(KeyCode::Char(' ')));
     assert!(app.create_dialog.disable_network);
+}
+
+#[test]
+fn test_dns_and_tls_tabs_disabled_when_network_off() {
+    let mut dlg = CreateDialog::open();
+    dlg.disable_network = true;
+    assert!(dlg.is_tab_disabled(DialogTab::Dns));
+    assert!(dlg.is_tab_disabled(DialogTab::Tls));
+    assert!(!dlg.is_tab_disabled(DialogTab::Network));
+    assert!(!dlg.is_tab_disabled(DialogTab::Security));
+
+    dlg.disable_network = false;
+    assert!(!dlg.is_tab_disabled(DialogTab::Dns));
+    assert!(!dlg.is_tab_disabled(DialogTab::Tls));
+}
+
+#[test]
+fn test_left_right_skip_disabled_dns_and_tls_tabs() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    app.create_dialog.disable_network = true;
+    app.create_dialog.switch_tab(DialogTab::Network);
+    handle_event(&mut app, key_press(KeyCode::Right));
+    // DNS and TLS are both skipped straight through to Security.
+    assert_eq!(app.create_dialog.tab, DialogTab::Security);
+    handle_event(&mut app, key_press(KeyCode::Left));
+    assert_eq!(app.create_dialog.tab, DialogTab::Network);
 }
 
 #[test]
@@ -900,10 +928,10 @@ fn test_dialog_net_rule_add_dialog_add_entry() {
     assert!(app.create_dialog.net_rule_add.visible);
 
     // Action: Allow -> Deny.
-    handle_event(&mut app, key_press(KeyCode::Right));
+    handle_event(&mut app, key_press(KeyCode::Char(' ')));
     // Direction: Egress -> Ingress.
     handle_event(&mut app, key_press(KeyCode::Tab));
-    handle_event(&mut app, key_press(KeyCode::Right));
+    handle_event(&mut app, key_press(KeyCode::Char(' ')));
     // Dest kind: Any -> Ip -> Cidr.
     handle_event(&mut app, key_press(KeyCode::Tab));
     handle_event(&mut app, key_press(KeyCode::Right));
@@ -1045,7 +1073,7 @@ fn test_dialog_mount_add_dialog_add_named_entry() {
     ];
     app.create_dialog.mount_add.guest_input = "/cache".into();
     app.create_dialog.mount_add.add_field = 0;
-    handle_event(&mut app, key_press(KeyCode::Char('n'))); // choose Named kind
+    handle_event(&mut app, key_press(KeyCode::Char(' '))); // toggle to Named kind
     app.create_dialog.mount_add.add_field = 2;
     app.create_dialog.mount_add.source_input = "my-cache".into();
     handle_event(&mut app, key_press(KeyCode::Enter));
@@ -1112,7 +1140,7 @@ fn test_mount_add_named_selection_submits_named_source() {
         },
     ];
     app.create_dialog.mount_add.add_field = 0;
-    handle_event(&mut app, key_press(KeyCode::Char('n')));
+    handle_event(&mut app, key_press(KeyCode::Char(' ')));
     app.create_dialog.mount_add.sync_selected_volume_from_source();
     app.create_dialog.mount_add.guest_input = "/cache".into();
     app.create_dialog.mount_add.add_field = 2;
@@ -1157,7 +1185,7 @@ fn test_dialog_secret_add_dialog_add_entry() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
     app.create_dialog.switch_tab(DialogTab::Security);
-    app.create_dialog.field = 9; // secrets list
+    app.create_dialog.field = 4; // secrets list
     handle_event(&mut app, key_press(KeyCode::Enter));
     handle_event(&mut app, key_press(KeyCode::Char('a')));
     assert!(app.create_dialog.secret_add.visible);
@@ -1222,7 +1250,7 @@ fn test_dialog_secrets_delete_entry() {
         inject_body: false,
         require_tls_identity: true,
     }];
-    app.create_dialog.field = 9;
+    app.create_dialog.field = 4;
     handle_event(&mut app, key_press(KeyCode::Enter));
     handle_event(&mut app, key_press(KeyCode::Char('d')));
     assert!(app.create_dialog.secrets.is_empty());
@@ -1619,7 +1647,7 @@ fn test_net_rule_reorder_plus_minus() {
 fn test_security_tab_holds_user_field() {
     let mut dlg = CreateDialog::open();
     dlg.switch_tab(DialogTab::Security);
-    assert_eq!(dlg.form_field_count(), 10);
+    assert_eq!(dlg.form_field_count(), 5);
     dlg.field = 0;
     assert!(dlg.current_field_mut().is_some());
 }

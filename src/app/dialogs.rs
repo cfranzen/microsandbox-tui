@@ -19,15 +19,17 @@ pub enum DialogTab {
     GuestOs,
     Network,
     Dns,
+    Tls,
     Security,
 }
 
 impl DialogTab {
-    const ALL: [DialogTab; 5] = [
+    const ALL: [DialogTab; 6] = [
         DialogTab::Basic,
         DialogTab::GuestOs,
         DialogTab::Network,
         DialogTab::Dns,
+        DialogTab::Tls,
         DialogTab::Security,
     ];
 
@@ -47,6 +49,7 @@ impl DialogTab {
             DialogTab::GuestOs => "Guest OS",
             DialogTab::Network => "Network",
             DialogTab::Dns => "DNS",
+            DialogTab::Tls => "TLS",
             DialogTab::Security => "Security",
         }
     }
@@ -568,7 +571,7 @@ pub struct CreateDialog {
 impl CreateDialog {
     const NETWORK_FIELDS: [usize; 5] = [0, 1, 2, 3, 4];
     const DNS_FIELDS: [usize; 3] = [0, 1, 2];
-    const SECURITY_TLS_FIELDS: [usize; 5] = [1, 2, 3, 4, 5];
+    const TLS_FIELDS: [usize; 5] = [0, 1, 2, 3, 4];
 
     pub fn open() -> Self {
         Self {
@@ -625,7 +628,8 @@ impl CreateDialog {
             DialogTab::GuestOs => 4,
             DialogTab::Network => 5,
             DialogTab::Dns => 3,
-            DialogTab::Security => 10,
+            DialogTab::Tls => 5,
+            DialogTab::Security => 5,
         }
     }
 
@@ -654,6 +658,26 @@ impl CreateDialog {
         self.field = 0;
         self.list_edit_mode = false;
         self.error = None;
+    }
+
+    /// True when `tab` cannot currently be selected — the DNS and TLS tabs
+    /// are both meaningless (and gated off) while network access itself is
+    /// disabled.
+    pub fn is_tab_disabled(&self, tab: DialogTab) -> bool {
+        self.disable_network && matches!(tab, DialogTab::Dns | DialogTab::Tls)
+    }
+
+    /// Returns the next tab in the given direction that isn't disabled via
+    /// [`Self::is_tab_disabled`], skipping over any that are.
+    pub fn next_enabled_tab(&self, forward: bool) -> DialogTab {
+        let mut tab = self.tab;
+        for _ in 0..DialogTab::ALL.len() {
+            tab = if forward { tab.next() } else { tab.prev() };
+            if !self.is_tab_disabled(tab) {
+                return tab;
+            }
+        }
+        self.tab
     }
 
     /// Returns a mutable reference to the text value of the focused field,
@@ -687,12 +711,15 @@ impl CreateDialog {
                 1 => Some(&mut self.dns_query_timeout_ms),
                 _ => None,
             },
+            DialogTab::Tls => match self.field {
+                1 => Some(&mut self.tls_bypass_patterns),
+                2 => Some(&mut self.tls_intercepted_ports),
+                _ => None,
+            },
             DialogTab::Security => match self.field {
                 0 => Some(&mut self.user),
-                2 => Some(&mut self.tls_bypass_patterns),
-                3 => Some(&mut self.tls_intercepted_ports),
-                7 => Some(&mut self.violation_passthrough_hosts),
-                8 => Some(&mut self.violation_passthrough_patterns),
+                2 => Some(&mut self.violation_passthrough_hosts),
+                3 => Some(&mut self.violation_passthrough_patterns),
                 _ => None,
             },
         }
@@ -707,14 +734,16 @@ impl CreateDialog {
             || (self.tab == DialogTab::Dns && self.field == 1)
     }
 
-    /// True when the focused field is a boolean toggle activated by Space.
+    /// True when the focused field is a boolean toggle or a fixed-choice
+    /// cycle field, both activated by Space.
     pub fn is_toggle_field(&self) -> bool {
         !self.is_create_focused()
             && matches!(
                 (self.tab, self.field),
                 (DialogTab::Network, 0 | 1 | 2)
                     | (DialogTab::Dns, 2)
-                    | (DialogTab::Security, 1 | 4 | 5 | 6)
+                    | (DialogTab::Tls, 0 | 3 | 4)
+                    | (DialogTab::Security, 1)
             )
     }
 
@@ -729,7 +758,7 @@ impl CreateDialog {
             (DialogTab::GuestOs, 3) => Some(ListField::Mounts),
             (DialogTab::Network, 3) => Some(ListField::Ports),
             (DialogTab::Network, 4) => Some(ListField::NetworkRules),
-            (DialogTab::Security, 9) => Some(ListField::Secrets),
+            (DialogTab::Security, 4) => Some(ListField::Secrets),
             _ => None,
         }
     }
@@ -741,7 +770,7 @@ impl CreateDialog {
         match tab {
             DialogTab::Network => Self::NETWORK_FIELDS.contains(&field_idx) && field_idx != 0,
             DialogTab::Dns => Self::DNS_FIELDS.contains(&field_idx),
-            DialogTab::Security => Self::SECURITY_TLS_FIELDS.contains(&field_idx),
+            DialogTab::Tls => Self::TLS_FIELDS.contains(&field_idx),
             _ => false,
         }
     }

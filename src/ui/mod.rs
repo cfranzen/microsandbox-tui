@@ -1,7 +1,7 @@
 //! Top-level UI rendering dispatcher.
 
 mod confirm_dialog;
-mod create_dialog;
+pub(crate) mod create_dialog;
 mod detail;
 mod exec_dialog;
 mod filesystem;
