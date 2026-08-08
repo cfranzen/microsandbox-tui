@@ -663,7 +663,7 @@ fn test_esc_exits_list_edit_mode_only() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
     app.create_dialog.switch_tab(DialogTab::Network);
-    app.create_dialog.field = 3;
+    app.create_dialog.field = 4;
     handle_event(&mut app, key_press(KeyCode::Enter));
     assert!(app.create_dialog.list_edit_mode);
     handle_event(&mut app, key_press(KeyCode::Esc));
@@ -800,7 +800,7 @@ fn test_dialog_port_add_dialog_add_entry() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
     app.create_dialog.switch_tab(DialogTab::Network);
-    app.create_dialog.field = 2; // ports list
+    app.create_dialog.field = 3; // ports list
     handle_event(&mut app, key_press(KeyCode::Enter));
     handle_event(&mut app, key_press(KeyCode::Char('a')));
     assert!(app.create_dialog.port_add.visible);
@@ -822,7 +822,7 @@ fn test_dialog_port_list_delete_entry() {
     app.create_dialog = CreateDialog::open();
     app.create_dialog.switch_tab(DialogTab::Network);
     app.create_dialog.ports = vec![(8080, 80)];
-    app.create_dialog.field = 2;
+    app.create_dialog.field = 3;
     handle_event(&mut app, key_press(KeyCode::Enter));
     handle_event(&mut app, key_press(KeyCode::Char('d')));
     assert!(app.create_dialog.ports.is_empty());
@@ -878,7 +878,7 @@ fn test_dialog_net_rule_add_dialog_add_entry() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
     app.create_dialog.switch_tab(DialogTab::Network);
-    app.create_dialog.field = 3; // network rules list
+    app.create_dialog.field = 4; // network rules list
     handle_event(&mut app, key_press(KeyCode::Enter));
     handle_event(&mut app, key_press(KeyCode::Char('a')));
     assert!(app.create_dialog.net_rule_add.visible);
@@ -931,7 +931,7 @@ fn test_dialog_net_rule_invalid_cidr_shows_error() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
     app.create_dialog.switch_tab(DialogTab::Network);
-    app.create_dialog.field = 3;
+    app.create_dialog.field = 4;
     handle_event(&mut app, key_press(KeyCode::Enter));
     handle_event(&mut app, key_press(KeyCode::Char('a')));
     handle_event(&mut app, key_press(KeyCode::Tab)); // action
@@ -963,7 +963,7 @@ fn test_dialog_network_rules_delete_entry() {
         protocols: vec![],
         port_range: None,
     }];
-    app.create_dialog.field = 3; // network rules list
+    app.create_dialog.field = 4; // network rules list
     handle_event(&mut app, key_press(KeyCode::Enter));
     handle_event(&mut app, key_press(KeyCode::Char('d')));
     assert!(app.create_dialog.network_rules.is_empty());
@@ -1218,7 +1218,7 @@ fn test_enter_on_list_opens_edit_dialog_prefilled() {
     app.create_dialog = CreateDialog::open();
     app.create_dialog.switch_tab(DialogTab::Network);
     app.create_dialog.ports = vec![(8080, 80)];
-    app.create_dialog.field = 2;
+    app.create_dialog.field = 3;
     handle_event(&mut app, key_press(KeyCode::Enter));
     handle_event(&mut app, key_press(KeyCode::Enter));
     assert!(app.create_dialog.port_add.visible);
@@ -1591,7 +1591,7 @@ fn test_net_rule_reorder_plus_minus() {
         },
     ];
     app.create_dialog.network_rules_selected = 1;
-    app.create_dialog.field = 3;
+    app.create_dialog.field = 4;
     handle_event(&mut app, key_press(KeyCode::Enter));
     handle_event(&mut app, key_press(KeyCode::Char('+')));
     assert_eq!(app.create_dialog.network_rules[0].dest_value, "b.com");

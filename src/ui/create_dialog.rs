@@ -218,11 +218,11 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 "Ports",
                 &dlg.ports,
                 dlg.ports_selected,
-                dlg.field == 2,
+                dlg.field == 3,
                 dlg.list_edit_mode,
                 |(h, g)| format!("{h} → {g}"),
                 chunks[3],
-                dlg.field_disabled_by_network(DialogTab::Network, 2),
+                dlg.field_disabled_by_network(DialogTab::Network, 3),
             );
             render_list_field(
                 f,
@@ -230,11 +230,11 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 "Net Rules (first match wins)",
                 &dlg.network_rules,
                 dlg.network_rules_selected,
-                dlg.field == 3,
+                dlg.field == 4,
                 dlg.list_edit_mode,
                 NetworkRule::summary,
                 chunks[4],
-                dlg.field_disabled_by_network(DialogTab::Network, 3),
+                dlg.field_disabled_by_network(DialogTab::Network, 4),
             );
         }
         DialogTab::Dns => {

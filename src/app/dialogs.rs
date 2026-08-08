@@ -618,7 +618,7 @@ impl CreateDialog {
         match self.tab {
             DialogTab::Basic => 7, // name image cpus max_cpus memory max_memory workdir
             DialogTab::GuestOs => 4,
-            DialogTab::Network => 4,
+            DialogTab::Network => 5,
             DialogTab::Dns => 3,
             DialogTab::Security => 10,
         }
@@ -722,8 +722,8 @@ impl CreateDialog {
         match (self.tab, self.field) {
             (DialogTab::GuestOs, 2) => Some(ListField::EnvVars),
             (DialogTab::GuestOs, 3) => Some(ListField::Mounts),
-            (DialogTab::Network, 2) => Some(ListField::Ports),
-            (DialogTab::Network, 3) => Some(ListField::NetworkRules),
+            (DialogTab::Network, 3) => Some(ListField::Ports),
+            (DialogTab::Network, 4) => Some(ListField::NetworkRules),
             (DialogTab::Security, 9) => Some(ListField::Secrets),
             _ => None,
         }
