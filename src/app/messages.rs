@@ -89,6 +89,8 @@ impl App {
                 if self.volumes_view.selected >= self.volumes_view.volumes.len() {
                     self.volumes_view.selected = self.volumes_view.volumes.len().saturating_sub(1);
                 }
+                self.create_dialog.mount_add.available_volumes = self.volumes_view.volumes.clone();
+                self.create_dialog.mount_add.sync_selected_volume_from_source();
             }
             AppMessage::VolumeList(Err(e)) => {
                 self.notify(format!("Volume list error: {e}"), true);

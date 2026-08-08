@@ -991,10 +991,8 @@ fn test_dialog_mount_add_dialog_add_bind_entry() {
     handle_event(&mut app, key_press(KeyCode::Enter));
     handle_event(&mut app, key_press(KeyCode::Char('a')));
     assert!(app.create_dialog.mount_add.visible);
-    for ch in "/data".chars() {
-        handle_event(&mut app, key_press(KeyCode::Char(ch)));
-    }
-    handle_event(&mut app, key_press(KeyCode::Enter));
+    app.create_dialog.mount_add.guest_input = "/data".into();
+    app.create_dialog.mount_add.add_field = 2;
     for ch in "/host/data".chars() {
         handle_event(&mut app, key_press(KeyCode::Char(ch)));
     }
@@ -1014,14 +1012,25 @@ fn test_dialog_mount_add_dialog_add_named_entry() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
     app.create_dialog.mount_add = MountAddDialog::open();
-    for ch in "/cache".chars() {
-        handle_event(&mut app, key_press(KeyCode::Char(ch)));
-    }
-    handle_event(&mut app, key_press(KeyCode::Enter)); // move to source field
+    app.create_dialog.mount_add.available_volumes = vec![
+        VolumeInfo {
+            name: "my-cache".into(),
+            kind: microsandbox::VolumeKind::Directory,
+            quota_mib: None,
+            used_bytes: 0,
+        },
+        VolumeInfo {
+            name: "other".into(),
+            kind: microsandbox::VolumeKind::Directory,
+            quota_mib: None,
+            used_bytes: 0,
+        },
+    ];
+    app.create_dialog.mount_add.guest_input = "/cache".into();
+    app.create_dialog.mount_add.add_field = 0;
     handle_event(&mut app, key_press(KeyCode::Char('n'))); // choose Named kind
-    for ch in "my-cache".chars() {
-        handle_event(&mut app, key_press(KeyCode::Char(ch)));
-    }
+    app.create_dialog.mount_add.add_field = 2;
+    app.create_dialog.mount_add.source_input = "my-cache".into();
     handle_event(&mut app, key_press(KeyCode::Enter));
     assert_eq!(
         app.create_dialog.mounts,
@@ -1030,6 +1039,85 @@ fn test_dialog_mount_add_dialog_add_named_entry() {
             source: MountSource::Named("my-cache".into()),
         }]
     );
+}
+
+#[test]
+fn test_mount_add_defaults_to_bind_kind() {
+    let dlg = MountAddDialog::open();
+    assert_eq!(dlg.kind, MountKindChoice::Bind);
+    assert_eq!(dlg.add_field, 0);
+}
+
+#[test]
+fn test_mount_add_ctrl_f_opens_dir_picker_for_bind() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    app.create_dialog.mount_add = MountAddDialog::open();
+    app.create_dialog.mount_add.kind = MountKindChoice::Bind;
+    app.create_dialog.mount_add.add_field = 2;
+    handle_event(
+        &mut app,
+        key_press_mod(KeyCode::Char('f'), KeyModifiers::CONTROL),
+    );
+    assert!(app.create_dialog.mount_add.dir_picker.visible);
+}
+
+#[test]
+fn test_mount_add_dir_picker_confirm_sets_bind_source() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    app.create_dialog.mount_add = MountAddDialog::open();
+    app.create_dialog.mount_add.kind = MountKindChoice::Bind;
+    app.create_dialog.mount_add.add_field = 2;
+    app.create_dialog.mount_add.dir_picker = DirPicker::open("/");
+    handle_event(&mut app, key_press(KeyCode::Char(' ')));
+    assert_eq!(app.create_dialog.mount_add.source_input, "/");
+    assert!(!app.create_dialog.mount_add.dir_picker.visible);
+}
+
+#[test]
+fn test_mount_add_named_selection_submits_named_source() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    app.create_dialog.mount_add = MountAddDialog::open();
+    app.create_dialog.mount_add.available_volumes = vec![
+        VolumeInfo {
+            name: "vol-a".into(),
+            kind: microsandbox::VolumeKind::Directory,
+            quota_mib: None,
+            used_bytes: 0,
+        },
+        VolumeInfo {
+            name: "vol-b".into(),
+            kind: microsandbox::VolumeKind::Directory,
+            quota_mib: None,
+            used_bytes: 0,
+        },
+    ];
+    app.create_dialog.mount_add.add_field = 0;
+    handle_event(&mut app, key_press(KeyCode::Char('n')));
+    app.create_dialog.mount_add.sync_selected_volume_from_source();
+    app.create_dialog.mount_add.guest_input = "/cache".into();
+    app.create_dialog.mount_add.add_field = 2;
+    app.create_dialog.mount_add.source_input = "vol-a".into();
+    handle_event(&mut app, key_press(KeyCode::Down));
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    assert_eq!(
+        app.create_dialog.mounts[0].source,
+        MountSource::Named("vol-b".into())
+    );
+}
+
+#[test]
+fn test_edit_named_mount_prefills_correctly() {
+    let mount = VolumeMountConfig {
+        guest_path: "/cache".into(),
+        source: MountSource::Named("named-vol".into()),
+    };
+    let dlg = MountAddDialog::open_for_edit(0, &mount);
+    assert_eq!(dlg.kind, MountKindChoice::Named);
+    assert_eq!(dlg.guest_input, "/cache");
+    assert_eq!(dlg.source_input, "named-vol");
 }
 
 #[test]
@@ -1179,7 +1267,7 @@ fn test_edit_mount_replaces_entry() {
     };
     app.create_dialog.mounts = vec![mount.clone()];
     app.create_dialog.mount_add = MountAddDialog::open_for_edit(0, &mount);
-    handle_event(&mut app, key_press(KeyCode::Enter));
+    app.create_dialog.mount_add.add_field = 2;
     app.create_dialog.mount_add.source_input.clear();
     for ch in "/other".chars() {
         handle_event(&mut app, key_press(KeyCode::Char(ch)));

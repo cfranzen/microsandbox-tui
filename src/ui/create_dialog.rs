@@ -1132,8 +1132,7 @@ fn render_mount_add_dialog(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    // border(2) + guest field(3) + source field(3) + kind line(1) + hint(1) = 10
-    let popup = centred_rect(65, 10, area);
+    let popup = centred_rect(70, if dialog.new_volume_mode { 17 } else { 15 }, area);
     f.render_widget(Clear, popup);
 
     let block = Block::default()
@@ -1152,59 +1151,144 @@ fn render_mount_add_dialog(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(3), // kind
             Constraint::Length(3), // guest path
-            Constraint::Length(3), // host path / volume name
-            Constraint::Length(1), // kind summary
+            Constraint::Length(5), // host path / volume list
+            Constraint::Length(if dialog.new_volume_mode { 3 } else { 1 }),
             Constraint::Length(1), // hint/error
         ])
         .split(inner);
+
+    let kind_block = Block::default()
+        .title(Span::styled(
+            " Kind ",
+            if dialog.add_field == 0 {
+                theme.text_bold()
+            } else {
+                theme.muted().add_modifier(Modifier::BOLD)
+            },
+        ))
+        .borders(Borders::ALL)
+        .border_type(theme.border_type(dialog.add_field == 0))
+        .border_style(theme.border_style(dialog.add_field == 0));
+    let kind_inner = kind_block.inner(chunks[0]);
+    f.render_widget(kind_block, chunks[0]);
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                " [Bind] ",
+                if dialog.kind == MountKindChoice::Bind {
+                    theme.selected()
+                } else {
+                    theme.muted()
+                },
+            ),
+            Span::raw(" "),
+            Span::styled(
+                " [Named] ",
+                if dialog.kind == MountKindChoice::Named {
+                    theme.selected()
+                } else {
+                    theme.muted()
+                },
+            ),
+        ])),
+        kind_inner,
+    );
 
     render_field(
         f,
         theme,
         "Guest",
         &dialog.guest_input,
-        dialog.add_field == 0,
-        chunks[0],
-        false,
-    );
-    let source_label = match dialog.kind {
-        MountKindChoice::Bind => "Host ",
-        MountKindChoice::Named => "Vol  ",
-    };
-    render_field(
-        f,
-        theme,
-        source_label,
-        &dialog.source_input,
         dialog.add_field == 1,
         chunks[1],
         false,
     );
+    match dialog.kind {
+        MountKindChoice::Bind => {
+            render_managed_field_with_hint(
+                f,
+                theme,
+                "Host Path",
+                if dialog.source_input.is_empty() {
+                    "(none)"
+                } else {
+                    &dialog.source_input
+                },
+                "browse",
+                dialog.add_field == 2,
+                chunks[2],
+            );
+        }
+        MountKindChoice::Named => {
+            let block = Block::default()
+                .title(Span::styled(
+                    " Volume ",
+                    if dialog.add_field == 2 {
+                        theme.text_bold()
+                    } else {
+                        theme.muted().add_modifier(Modifier::BOLD)
+                    },
+                ))
+                .borders(Borders::ALL)
+                .border_type(theme.border_type(dialog.add_field == 2))
+                .border_style(theme.border_style(dialog.add_field == 2));
+            let inner = block.inner(chunks[2]);
+            f.render_widget(block, chunks[2]);
+            if dialog.available_volumes.is_empty() {
+                f.render_widget(
+                    Paragraph::new(Span::styled(
+                        " (no volumes yet — Ctrl-N to create)",
+                        theme.muted(),
+                    )),
+                    inner,
+                );
+            } else {
+                for (i, vol) in dialog.available_volumes.iter().take(inner.height as usize).enumerate() {
+                    let style = if dialog.add_field == 2 && i == dialog.selected_volume {
+                        theme.selected()
+                    } else {
+                        theme.text()
+                    };
+                    let row = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
+                    f.render_widget(
+                        Paragraph::new(Span::styled(format!(" {}", vol.name), style)),
+                        row,
+                    );
+                }
+            }
+        }
+    }
 
-    let kind_label = match dialog.kind {
-        MountKindChoice::Bind => "Bind mount (b)",
-        MountKindChoice::Named => "Named volume (n)",
-    };
-    f.render_widget(
-        Paragraph::new(Span::styled(format!("Kind: {kind_label}"), theme.accent())),
-        chunks[2],
-    );
+    if dialog.new_volume_mode {
+        let kind = if dialog.new_volume_disk { "Disk" } else { "Directory" };
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("New volume: ", theme.accent_bold()),
+                Span::styled(dialog.new_volume_name.as_str(), theme.text()),
+                Span::styled(format!("  Kind: {kind} (Space toggles)"), theme.muted()),
+            ])),
+            chunks[3],
+        );
+    }
 
     if let Some(ref err) = dialog.error {
         f.render_widget(
             Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
-            chunks[3],
+            chunks[4],
         );
     } else {
         f.render_widget(
             Paragraph::new(theme.hint_line(&[
                 ("Tab", "field"),
                 ("b/n", "kind"),
+                ("Ctrl-F", "browse bind"),
+                ("Ctrl-N", "new volume"),
                 ("Enter", "add"),
                 ("Esc", "cancel"),
             ])),
-            chunks[3],
+            chunks[4],
         );
     }
 }

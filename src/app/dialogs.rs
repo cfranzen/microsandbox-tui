@@ -333,8 +333,14 @@ pub struct MountAddDialog {
     pub source_input: String,
     /// Which mount source kind is being configured.
     pub kind: MountKindChoice,
-    /// Focused input index: 0 = guest path, 1 = source.
+    /// Focused input index: 0 = kind, 1 = guest path, 2 = source.
     pub add_field: usize,
+    pub dir_picker: DirPicker,
+    pub available_volumes: Vec<VolumeInfo>,
+    pub selected_volume: usize,
+    pub new_volume_mode: bool,
+    pub new_volume_name: String,
+    pub new_volume_disk: bool,
     pub error: Option<String>,
 }
 
@@ -358,7 +364,28 @@ impl MountAddDialog {
             source_input,
             kind,
             add_field: 0,
+            selected_volume: 0,
             error: None,
+            ..Default::default()
+        }
+    }
+
+    pub fn sync_selected_volume_from_source(&mut self) {
+        if self.available_volumes.is_empty() {
+            self.selected_volume = 0;
+            return;
+        }
+        if let Some(idx) = self
+            .available_volumes
+            .iter()
+            .position(|vol| vol.name == self.source_input)
+        {
+            self.selected_volume = idx;
+        } else if self.selected_volume >= self.available_volumes.len() {
+            self.selected_volume = self.available_volumes.len() - 1;
+        }
+        if let Some(vol) = self.available_volumes.get(self.selected_volume) {
+            self.source_input = vol.name.clone();
         }
     }
 }

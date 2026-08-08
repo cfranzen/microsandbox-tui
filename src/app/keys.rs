@@ -33,6 +33,12 @@ fn point_in_rect(x: u16, y: u16, rect: Rect) -> bool {
     rect.x <= x && x < rect.x + rect.width && rect.y <= y && y < rect.y + rect.height
 }
 
+fn request_volume_refresh_if_runtime(app: &App) {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        request_volume_refresh(app);
+    }
+}
+
 fn move_network_rule(app: &mut App, delta: isize) {
     let selected = app.create_dialog.network_rules_selected;
     let len = app.create_dialog.network_rules.len();
@@ -185,7 +191,7 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
         }
         KeyCode::Char('v') => {
             app.volumes_view = VolumesView::open();
-            request_volume_refresh(app);
+            request_volume_refresh_if_runtime(app);
         }
         KeyCode::Char('r') => {
             app.request_refresh();
@@ -460,6 +466,7 @@ fn open_list_edit_dialog(app: &mut App, list: ListField) {
             {
                 app.create_dialog.mount_add =
                     MountAddDialog::open_for_edit(app.create_dialog.mounts_selected, &entry);
+                request_volume_refresh_if_runtime(app);
             }
         }
         ListField::Ports => {
@@ -531,7 +538,10 @@ fn move_list_selection(app: &mut App, list: ListField, delta: i32) {
 fn open_list_add_dialog(app: &mut App, list: ListField) {
     match list {
         ListField::EnvVars => app.create_dialog.env_var_add = EnvVarAddDialog::open(),
-        ListField::Mounts => app.create_dialog.mount_add = MountAddDialog::open(),
+        ListField::Mounts => {
+            app.create_dialog.mount_add = MountAddDialog::open();
+            request_volume_refresh_if_runtime(app);
+        }
         ListField::Ports => app.create_dialog.port_add = PortAddDialog::open(),
         ListField::NetworkRules => app.create_dialog.net_rule_add = NetRuleAddDialog::open(),
         ListField::Secrets => app.create_dialog.secret_add = SecretAddDialog::open(),
@@ -563,12 +573,21 @@ fn delete_list_selected(app: &mut App, list: ListField) {
 }
 
 fn handle_picker_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+    let mount_picker_visible = app.create_dialog.mount_add.dir_picker.visible;
     if code == KeyCode::Esc {
-        app.create_dialog.dir_picker.visible = false;
+        if mount_picker_visible {
+            app.create_dialog.mount_add.dir_picker.visible = false;
+        } else {
+            app.create_dialog.dir_picker.visible = false;
+        }
         return;
     }
 
-    let picker = &mut app.create_dialog.dir_picker;
+    let picker = if mount_picker_visible {
+        &mut app.create_dialog.mount_add.dir_picker
+    } else {
+        &mut app.create_dialog.dir_picker
+    };
     match code {
         KeyCode::Up => {
             if picker.selected > 0 {
@@ -623,9 +642,17 @@ fn handle_picker_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
             // Space confirms the current directory without descending.
             if !picker.showing_drives {
                 let chosen = picker.path.clone();
-                app.create_dialog.workdir = chosen;
+                if mount_picker_visible {
+                    app.create_dialog.mount_add.source_input = chosen;
+                } else {
+                    app.create_dialog.workdir = chosen;
+                }
             }
-            app.create_dialog.dir_picker.visible = false;
+            if mount_picker_visible {
+                app.create_dialog.mount_add.dir_picker.visible = false;
+            } else {
+                app.create_dialog.dir_picker.visible = false;
+            }
         }
         // Jump to filesystem root / drive list.
         KeyCode::Char('/') => {
@@ -955,37 +982,94 @@ fn submit_net_rule(app: &mut App) {
     app.create_dialog.net_rule_add.visible = false;
 }
 
-fn handle_mount_add_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+fn handle_mount_add_key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
+    if app.create_dialog.mount_add.dir_picker.visible {
+        handle_picker_key(app, code, mods);
+        return;
+    }
     match code {
         KeyCode::Esc => {
-            app.create_dialog.mount_add.visible = false;
+            if app.create_dialog.mount_add.new_volume_mode {
+                app.create_dialog.mount_add.new_volume_mode = false;
+                app.create_dialog.mount_add.error = None;
+            } else {
+                app.create_dialog.mount_add.visible = false;
+            }
         }
-        KeyCode::Tab | KeyCode::Down => {
+        KeyCode::Tab => {
             let f = app.create_dialog.mount_add.add_field;
-            app.create_dialog.mount_add.add_field = (f + 1) % 2;
+            app.create_dialog.mount_add.add_field = (f + 1) % 3;
         }
-        KeyCode::BackTab | KeyCode::Up => {
+        KeyCode::BackTab => {
             let f = app.create_dialog.mount_add.add_field;
-            app.create_dialog.mount_add.add_field = (f + 1) % 2;
+            app.create_dialog.mount_add.add_field = if f == 0 { 2 } else { f - 1 };
         }
-        KeyCode::Char('b') | KeyCode::Char('B') if app.create_dialog.mount_add.add_field == 1 => {
+        KeyCode::Char('b') | KeyCode::Char('B') if app.create_dialog.mount_add.add_field == 0 => {
             app.create_dialog.mount_add.kind = MountKindChoice::Bind;
+            app.create_dialog.mount_add.error = None;
         }
-        KeyCode::Char('n') | KeyCode::Char('N') if app.create_dialog.mount_add.add_field == 1 => {
+        KeyCode::Char('n') | KeyCode::Char('N') if app.create_dialog.mount_add.add_field == 0 => {
             app.create_dialog.mount_add.kind = MountKindChoice::Named;
+            app.create_dialog.mount_add.sync_selected_volume_from_source();
+            app.create_dialog.mount_add.error = None;
+        }
+        KeyCode::Char('f')
+            if mods.contains(KeyModifiers::CONTROL)
+                && app.create_dialog.mount_add.kind == MountKindChoice::Bind
+                && app.create_dialog.mount_add.add_field == 2 =>
+        {
+            let initial = app.create_dialog.mount_add.source_input.trim().to_owned();
+            let start = if initial.is_empty() { "/" } else { &initial };
+            app.create_dialog.mount_add.dir_picker = DirPicker::open(start);
+        }
+        KeyCode::Char('n')
+            if mods.contains(KeyModifiers::CONTROL)
+                && app.create_dialog.mount_add.kind == MountKindChoice::Named
+                && app.create_dialog.mount_add.add_field == 2 =>
+        {
+            app.create_dialog.mount_add.new_volume_mode = true;
+            app.create_dialog.mount_add.new_volume_name.clear();
+            app.create_dialog.mount_add.new_volume_disk = false;
+            app.create_dialog.mount_add.error = None;
+        }
+        KeyCode::Char(' ') if app.create_dialog.mount_add.new_volume_mode => {
+            app.create_dialog.mount_add.new_volume_disk = !app.create_dialog.mount_add.new_volume_disk;
         }
         KeyCode::Backspace => {
             let dlg = &mut app.create_dialog.mount_add;
-            if dlg.add_field == 0 {
+            if dlg.new_volume_mode {
+                dlg.new_volume_name.pop();
+            } else if dlg.add_field == 1 {
                 dlg.guest_input.pop();
-            } else {
+            } else if dlg.add_field == 2 && dlg.kind == MountKindChoice::Bind {
                 dlg.source_input.pop();
             }
             dlg.error = None;
         }
         KeyCode::Enter => {
-            if app.create_dialog.mount_add.add_field == 0 {
-                app.create_dialog.mount_add.add_field = 1;
+            if app.create_dialog.mount_add.new_volume_mode {
+                let name = app.create_dialog.mount_add.new_volume_name.trim().to_owned();
+                if name.is_empty() {
+                    app.create_dialog.mount_add.error = Some("Name cannot be empty".into());
+                } else {
+                    let tx = app.msg_tx.clone();
+                    let disk = app.create_dialog.mount_add.new_volume_disk;
+                    app.create_dialog.mount_add.new_volume_mode = false;
+                    app.create_dialog.mount_add.source_input = name.clone();
+                    tokio::spawn(async move {
+                        let result = crate::sandbox::create_volume(&name, disk, None).await;
+                        let (msg, is_err) = match result {
+                            Ok(()) => (format!("Created volume '{name}'"), false),
+                            Err(e) => (format!("Create volume failed: {e}"), true),
+                        };
+                        let _ = tx.send(AppMessage::Notification(msg, is_err));
+                        if let Ok(list) = crate::sandbox::list_volumes().await {
+                            let _ = tx.send(AppMessage::VolumeList(Ok(list)));
+                        }
+                    });
+                }
+            } else if app.create_dialog.mount_add.add_field < 2 {
+                app.create_dialog.mount_add.add_field += 1;
             } else {
                 let guest = app.create_dialog.mount_add.guest_input.trim().to_owned();
                 let source_val = app.create_dialog.mount_add.source_input.trim().to_owned();
@@ -1016,12 +1100,38 @@ fn handle_mount_add_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
         }
         KeyCode::Char(c) => {
             let dlg = &mut app.create_dialog.mount_add;
-            if dlg.add_field == 0 {
+            if dlg.new_volume_mode {
+                dlg.new_volume_name.push(c);
+            } else if dlg.add_field == 1 {
                 dlg.guest_input.push(c);
-            } else {
+            } else if dlg.add_field == 2 && dlg.kind == MountKindChoice::Bind {
                 dlg.source_input.push(c);
             }
             dlg.error = None;
+        }
+        KeyCode::Up
+            if app.create_dialog.mount_add.kind == MountKindChoice::Named
+                && app.create_dialog.mount_add.add_field == 2 =>
+        {
+            let dlg = &mut app.create_dialog.mount_add;
+            if dlg.selected_volume > 0 {
+                dlg.selected_volume -= 1;
+            }
+            if let Some(vol) = dlg.available_volumes.get(dlg.selected_volume) {
+                dlg.source_input = vol.name.clone();
+            }
+        }
+        KeyCode::Down
+            if app.create_dialog.mount_add.kind == MountKindChoice::Named
+                && app.create_dialog.mount_add.add_field == 2 =>
+        {
+            let dlg = &mut app.create_dialog.mount_add;
+            if dlg.selected_volume + 1 < dlg.available_volumes.len() {
+                dlg.selected_volume += 1;
+            }
+            if let Some(vol) = dlg.available_volumes.get(dlg.selected_volume) {
+                dlg.source_input = vol.name.clone();
+            }
         }
         _ => {}
     }
