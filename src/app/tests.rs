@@ -8,7 +8,8 @@ use crossterm::event::{
 
 use super::keys::validate_cidr;
 use crate::sandbox::{
-    MountSource, NetRuleAction, NetRuleDirection, NetworkRule, VolumeInfo, VolumeMountConfig,
+    MountSource, NetRuleAction, NetRuleDestGroup, NetRuleDestKind, NetRuleDirection, NetworkRule,
+    SecretConfig, SecretHostKind, SecretHostPattern, VolumeInfo, VolumeMountConfig,
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -393,9 +394,7 @@ fn test_create_dialog_next_field_wraps() {
     dlg.next_field();
     assert_eq!(dlg.field, 6);
     dlg.next_field();
-    assert_eq!(dlg.field, 7);
-    dlg.next_field();
-    assert_eq!(dlg.field, 8); // Create button
+    assert_eq!(dlg.field, 7); // Create button
     dlg.next_field();
     assert_eq!(dlg.field, 0);
 }
@@ -413,14 +412,16 @@ fn test_create_dialog_current_field_mut() {
     dlg.current_field_mut().unwrap().push('4');
     assert_eq!(dlg.cpus, "14");
     dlg.field = 3;
+    dlg.current_field_mut().unwrap().push_str("4");
+    assert_eq!(dlg.max_cpus, "4");
+    dlg.field = 4;
     dlg.current_field_mut().unwrap().push_str("1024");
     assert_eq!(dlg.memory, "5121024");
-    // Fields 4 (ports), 5 (env vars), and 6 (workdir) are managed by
-    // sub-dialogs / the directory picker rather than direct text input.
-    dlg.field = 4;
-    assert!(dlg.current_field_mut().is_none());
     dlg.field = 5;
-    assert!(dlg.current_field_mut().is_none());
+    dlg.current_field_mut().unwrap().push_str("2048");
+    assert_eq!(dlg.max_memory, "2048");
+    // Field 6 (workdir) is managed by the directory picker rather than
+    // direct text input.
     dlg.field = 6;
     assert!(dlg.current_field_mut().is_none());
 }
@@ -678,7 +679,7 @@ fn test_dialog_backtab_from_first_wraps_to_last() {
     app.create_dialog = CreateDialog::open();
     // field == 0
     handle_event(&mut app, key_press(KeyCode::BackTab));
-    assert_eq!(app.create_dialog.field, 8); // Create button
+    assert_eq!(app.create_dialog.field, 7); // Create button
 }
 
 #[test]
@@ -731,33 +732,43 @@ fn test_dialog_left_right_switches_tab() {
     app.create_dialog = CreateDialog::open();
     app.create_dialog.field = 3;
     handle_event(&mut app, key_press(KeyCode::Right));
-    assert_eq!(app.create_dialog.tab, DialogTab::Advanced);
+    assert_eq!(app.create_dialog.tab, DialogTab::GuestOs);
     assert_eq!(app.create_dialog.field, 0);
 
-    app.create_dialog.field = 4;
+    app.create_dialog.field = 2;
     handle_event(&mut app, key_press(KeyCode::Left));
     assert_eq!(app.create_dialog.tab, DialogTab::Basic);
     assert_eq!(app.create_dialog.field, 0);
 }
 
 #[test]
+fn test_dialog_tab_cycle_order() {
+    assert_eq!(DialogTab::Basic.next(), DialogTab::GuestOs);
+    assert_eq!(DialogTab::GuestOs.next(), DialogTab::Network);
+    assert_eq!(DialogTab::Network.next(), DialogTab::Secrets);
+    assert_eq!(DialogTab::Secrets.next(), DialogTab::Basic);
+    assert_eq!(DialogTab::Basic.prev(), DialogTab::Secrets);
+    assert_eq!(DialogTab::Secrets.prev(), DialogTab::Network);
+}
+
+#[test]
 fn test_dialog_space_toggles_disable_network() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
-    app.create_dialog.switch_tab(DialogTab::Advanced);
-    app.create_dialog.field = 5;
+    app.create_dialog.switch_tab(DialogTab::Network);
+    app.create_dialog.field = 0;
     handle_event(&mut app, key_press(KeyCode::Char(' ')));
     assert!(app.create_dialog.disable_network);
 }
 
 #[test]
-fn test_dialog_ports_sub_dialog_add_entry() {
+fn test_dialog_port_add_dialog_add_entry() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
-    app.create_dialog.field = 4;
+    app.create_dialog.switch_tab(DialogTab::Network);
+    app.create_dialog.field = 1; // ports list
     handle_event(&mut app, key_press(KeyCode::Enter));
-    assert!(app.create_dialog.ports_dialog.visible);
-    handle_event(&mut app, key_press(KeyCode::Char('a')));
+    assert!(app.create_dialog.port_add.visible);
     for ch in "8080".chars() {
         handle_event(&mut app, key_press(KeyCode::Char(ch)));
     }
@@ -766,18 +777,29 @@ fn test_dialog_ports_sub_dialog_add_entry() {
         handle_event(&mut app, key_press(KeyCode::Char(ch)));
     }
     handle_event(&mut app, key_press(KeyCode::Enter));
-    handle_event(&mut app, key_press(KeyCode::Esc));
     assert_eq!(app.create_dialog.ports, vec![(8080, 80)]);
+    assert!(!app.create_dialog.port_add.visible);
 }
 
 #[test]
-fn test_dialog_env_vars_sub_dialog_add_entry() {
+fn test_dialog_port_list_delete_entry() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
-    app.create_dialog.field = 5;
+    app.create_dialog.switch_tab(DialogTab::Network);
+    app.create_dialog.ports = vec![(8080, 80)];
+    app.create_dialog.field = 1;
+    handle_event(&mut app, key_press(KeyCode::Char('d')));
+    assert!(app.create_dialog.ports.is_empty());
+}
+
+#[test]
+fn test_dialog_env_var_add_dialog_add_entry() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    app.create_dialog.switch_tab(DialogTab::GuestOs);
+    app.create_dialog.field = 3; // env vars list
     handle_event(&mut app, key_press(KeyCode::Enter));
-    assert!(app.create_dialog.env_vars_dialog.visible);
-    handle_event(&mut app, key_press(KeyCode::Char('a')));
+    assert!(app.create_dialog.env_var_add.visible);
     for ch in "FOO".chars() {
         handle_event(&mut app, key_press(KeyCode::Char(ch)));
     }
@@ -786,18 +808,17 @@ fn test_dialog_env_vars_sub_dialog_add_entry() {
         handle_event(&mut app, key_press(KeyCode::Char(ch)));
     }
     handle_event(&mut app, key_press(KeyCode::Enter));
-    handle_event(&mut app, key_press(KeyCode::Esc));
     assert_eq!(
         app.create_dialog.env_vars,
         vec![("FOO".to_string(), "bar".to_string())]
     );
+    assert!(!app.create_dialog.env_var_add.visible);
 }
 
 #[test]
-fn test_dialog_numeric_filter_on_advanced_max_cpus() {
+fn test_dialog_numeric_filter_on_max_cpus() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
-    app.create_dialog.switch_tab(DialogTab::Advanced);
     app.create_dialog.field = 3; // max_cpus
     handle_event(&mut app, key_press(KeyCode::Char('x')));
     assert!(app.create_dialog.error.is_some());
@@ -808,66 +829,104 @@ fn test_dialog_numeric_filter_on_advanced_max_cpus() {
 fn test_dialog_toggle_field_ignores_char_input() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
-    app.create_dialog.switch_tab(DialogTab::Advanced);
-    app.create_dialog.field = 5;
+    app.create_dialog.switch_tab(DialogTab::Network);
+    app.create_dialog.field = 0;
     handle_event(&mut app, key_press(KeyCode::Char('x')));
     assert!(!app.create_dialog.disable_network);
     assert!(app.create_dialog.error.is_none());
 }
 
 #[test]
-fn test_dialog_network_rules_sub_dialog_add_entry() {
+fn test_dialog_net_rule_add_dialog_add_entry() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
-    app.create_dialog.switch_tab(DialogTab::Advanced);
-    app.create_dialog.field = 6;
+    app.create_dialog.switch_tab(DialogTab::Network);
+    app.create_dialog.field = 2; // network rules list
     handle_event(&mut app, key_press(KeyCode::Enter));
-    assert!(app.create_dialog.network_rules_dialog.visible);
-    handle_event(&mut app, key_press(KeyCode::Char('a')));
-    handle_event(&mut app, key_press(KeyCode::Char('i')));
-    handle_event(&mut app, key_press(KeyCode::Char(' ')));
+    assert!(app.create_dialog.net_rule_add.visible);
+
+    // Direction: Egress -> Ingress.
+    handle_event(&mut app, key_press(KeyCode::Right));
+    // Action: Allow -> Deny.
+    handle_event(&mut app, key_press(KeyCode::Tab));
+    handle_event(&mut app, key_press(KeyCode::Right));
+    // Dest kind: Any -> Ip -> Cidr.
+    handle_event(&mut app, key_press(KeyCode::Tab));
+    handle_event(&mut app, key_press(KeyCode::Right));
+    handle_event(&mut app, key_press(KeyCode::Right));
+    // Dest value.
+    handle_event(&mut app, key_press(KeyCode::Tab));
     for ch in "10.0.0.0/8".chars() {
         handle_event(&mut app, key_press(KeyCode::Char(ch)));
     }
+    // Protocols: leave as "any".
+    handle_event(&mut app, key_press(KeyCode::Tab));
+    // Ports: leave as "any", then submit.
+    handle_event(&mut app, key_press(KeyCode::Tab));
     handle_event(&mut app, key_press(KeyCode::Enter));
-    handle_event(&mut app, key_press(KeyCode::Esc));
-    assert_eq!(
-        app.create_dialog.network_rules,
-        vec![NetworkRule {
-            cidr: "10.0.0.0/8".into(),
-            action: NetRuleAction::Deny,
-            direction: NetRuleDirection::Ingress,
-        }]
-    );
+
+    assert_eq!(app.create_dialog.network_rules.len(), 1);
+    let rule = &app.create_dialog.network_rules[0];
+    assert_eq!(rule.direction, NetRuleDirection::Ingress);
+    assert_eq!(rule.action, NetRuleAction::Deny);
+    assert_eq!(rule.dest_kind, NetRuleDestKind::Cidr);
+    assert_eq!(rule.dest_value, "10.0.0.0/8");
+    assert!(!app.create_dialog.net_rule_add.visible);
 }
 
 #[test]
-fn test_dialog_network_rules_invalid_cidr_shows_error() {
+fn test_dialog_net_rule_icmp_rejected_on_ingress() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
-    app.create_dialog.switch_tab(DialogTab::Advanced);
-    app.create_dialog.field = 6;
+    app.create_dialog.net_rule_add = NetRuleAddDialog::open();
+    app.create_dialog.net_rule_add.direction = NetRuleDirection::Ingress;
+    app.create_dialog.net_rule_add.add_field = 4; // protocols
+    handle_event(&mut app, key_press(KeyCode::Right)); // move cursor to Udp
+    handle_event(&mut app, key_press(KeyCode::Right)); // move cursor to Icmpv4
+    handle_event(&mut app, key_press(KeyCode::Char(' '))); // try to toggle it on
+    assert!(app.create_dialog.net_rule_add.error.is_some());
+    assert!(app.create_dialog.net_rule_add.protocols.is_empty());
+}
+
+#[test]
+fn test_dialog_net_rule_invalid_cidr_shows_error() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    app.create_dialog.switch_tab(DialogTab::Network);
+    app.create_dialog.field = 2;
     handle_event(&mut app, key_press(KeyCode::Enter));
-    handle_event(&mut app, key_press(KeyCode::Char('a')));
+    handle_event(&mut app, key_press(KeyCode::Tab)); // action
+    handle_event(&mut app, key_press(KeyCode::Tab)); // dest kind
+    handle_event(&mut app, key_press(KeyCode::Right)); // Any -> Ip
+    handle_event(&mut app, key_press(KeyCode::Right)); // Ip -> Cidr
+    handle_event(&mut app, key_press(KeyCode::Tab)); // dest value
     for ch in "not-a-cidr".chars() {
         handle_event(&mut app, key_press(KeyCode::Char(ch)));
     }
-    handle_event(&mut app, key_press(KeyCode::Enter));
-    assert!(app.create_dialog.network_rules_dialog.error.is_some());
-    assert!(app.create_dialog.network_rules_dialog.entries.is_empty());
+    handle_event(&mut app, key_press(KeyCode::Tab)); // protocols
+    handle_event(&mut app, key_press(KeyCode::Tab)); // ports
+    handle_event(&mut app, key_press(KeyCode::Enter)); // submit
+    assert!(app.create_dialog.net_rule_add.error.is_some());
+    assert!(app.create_dialog.network_rules.is_empty());
 }
 
 #[test]
 fn test_dialog_network_rules_delete_entry() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
-    app.create_dialog.network_rules_dialog = NetworkRulesDialog::open(vec![NetworkRule {
-        cidr: "1.2.3.0/24".into(),
-        action: NetRuleAction::Allow,
+    app.create_dialog.switch_tab(DialogTab::Network);
+    app.create_dialog.network_rules = vec![NetworkRule {
         direction: NetRuleDirection::Egress,
-    }]);
+        action: NetRuleAction::Allow,
+        dest_kind: NetRuleDestKind::Cidr,
+        dest_value: "1.2.3.0/24".into(),
+        dest_group: NetRuleDestGroup::Public,
+        protocols: vec![],
+        port_range: None,
+    }];
+    app.create_dialog.field = 2; // network rules list
     handle_event(&mut app, key_press(KeyCode::Char('d')));
-    assert!(app.create_dialog.network_rules_dialog.entries.is_empty());
+    assert!(app.create_dialog.network_rules.is_empty());
 }
 
 #[test]
@@ -885,13 +944,13 @@ fn test_validate_cidr_rejects_malformed() {
 }
 
 #[test]
-fn test_dialog_mounts_sub_dialog_add_bind_entry() {
+fn test_dialog_mount_add_dialog_add_bind_entry() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
-    app.create_dialog.field = 7;
+    app.create_dialog.switch_tab(DialogTab::GuestOs);
+    app.create_dialog.field = 4; // mounts list
     handle_event(&mut app, key_press(KeyCode::Enter));
-    assert!(app.create_dialog.mounts_dialog.visible);
-    handle_event(&mut app, key_press(KeyCode::Char('a')));
+    assert!(app.create_dialog.mount_add.visible);
     for ch in "/data".chars() {
         handle_event(&mut app, key_press(KeyCode::Char(ch)));
     }
@@ -900,7 +959,6 @@ fn test_dialog_mounts_sub_dialog_add_bind_entry() {
         handle_event(&mut app, key_press(KeyCode::Char(ch)));
     }
     handle_event(&mut app, key_press(KeyCode::Enter));
-    handle_event(&mut app, key_press(KeyCode::Esc));
     assert_eq!(
         app.create_dialog.mounts,
         vec![VolumeMountConfig {
@@ -908,14 +966,14 @@ fn test_dialog_mounts_sub_dialog_add_bind_entry() {
             source: MountSource::Bind("/host/data".into()),
         }]
     );
+    assert!(!app.create_dialog.mount_add.visible);
 }
 
 #[test]
-fn test_dialog_mounts_sub_dialog_add_named_entry() {
+fn test_dialog_mount_add_dialog_add_named_entry() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
-    app.create_dialog.mounts_dialog = MountsDialog::open(vec![]);
-    handle_event(&mut app, key_press(KeyCode::Char('a')));
+    app.create_dialog.mount_add = MountAddDialog::open();
     for ch in "/cache".chars() {
         handle_event(&mut app, key_press(KeyCode::Char(ch)));
     }
@@ -926,7 +984,7 @@ fn test_dialog_mounts_sub_dialog_add_named_entry() {
     }
     handle_event(&mut app, key_press(KeyCode::Enter));
     assert_eq!(
-        app.create_dialog.mounts_dialog.entries,
+        app.create_dialog.mounts,
         vec![VolumeMountConfig {
             guest_path: "/cache".into(),
             source: MountSource::Named("my-cache".into()),
@@ -938,12 +996,88 @@ fn test_dialog_mounts_sub_dialog_add_named_entry() {
 fn test_dialog_mounts_delete_entry() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
-    app.create_dialog.mounts_dialog = MountsDialog::open(vec![VolumeMountConfig {
+    app.create_dialog.switch_tab(DialogTab::GuestOs);
+    app.create_dialog.mounts = vec![VolumeMountConfig {
         guest_path: "/data".into(),
         source: MountSource::Bind("/host".into()),
-    }]);
+    }];
+    app.create_dialog.field = 4;
     handle_event(&mut app, key_press(KeyCode::Char('d')));
-    assert!(app.create_dialog.mounts_dialog.entries.is_empty());
+    assert!(app.create_dialog.mounts.is_empty());
+}
+
+#[test]
+fn test_dialog_secret_add_dialog_add_entry() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    app.create_dialog.switch_tab(DialogTab::Secrets);
+    app.create_dialog.field = 0; // secrets list
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    assert!(app.create_dialog.secret_add.visible);
+    for ch in "OPENAI_API_KEY".chars() {
+        handle_event(&mut app, key_press(KeyCode::Char(ch)));
+    }
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    for ch in "sk-secret".chars() {
+        handle_event(&mut app, key_press(KeyCode::Char(ch)));
+    }
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    for ch in "api.openai.com".chars() {
+        handle_event(&mut app, key_press(KeyCode::Char(ch)));
+    }
+    // Skip the four injection toggles and TLS-identity requirement, then submit.
+    for _ in 0..6 {
+        handle_event(&mut app, key_press(KeyCode::Enter));
+    }
+    assert_eq!(app.create_dialog.secrets.len(), 1);
+    let secret = &app.create_dialog.secrets[0];
+    assert_eq!(secret.env_var, "OPENAI_API_KEY");
+    assert_eq!(secret.value, "sk-secret");
+    assert_eq!(secret.allowed_hosts.len(), 1);
+    assert!(!app.create_dialog.secret_add.visible);
+}
+
+#[test]
+fn test_dialog_secret_add_requires_host() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    app.create_dialog.secret_add = SecretAddDialog::open();
+    for ch in "TOKEN".chars() {
+        handle_event(&mut app, key_press(KeyCode::Char(ch)));
+    }
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    for ch in "abc".chars() {
+        handle_event(&mut app, key_press(KeyCode::Char(ch)));
+    }
+    // Jump straight to the last field (hosts left empty) and submit.
+    for _ in 0..7 {
+        handle_event(&mut app, key_press(KeyCode::Enter));
+    }
+    assert!(app.create_dialog.secret_add.error.is_some());
+    assert!(app.create_dialog.secrets.is_empty());
+}
+
+#[test]
+fn test_dialog_secrets_delete_entry() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    app.create_dialog.switch_tab(DialogTab::Secrets);
+    app.create_dialog.secrets = vec![SecretConfig {
+        env_var: "TOKEN".into(),
+        value: "abc".into(),
+        allowed_hosts: vec![SecretHostPattern {
+            kind: SecretHostKind::Exact,
+            value: "example.com".into(),
+        }],
+        inject_headers: true,
+        inject_basic_auth: true,
+        inject_query: false,
+        inject_body: false,
+        require_tls_identity: true,
+    }];
+    app.create_dialog.field = 0;
+    handle_event(&mut app, key_press(KeyCode::Char('d')));
+    assert!(app.create_dialog.secrets.is_empty());
 }
 
 #[tokio::test]
@@ -1632,7 +1766,7 @@ fn test_dialog_down_advances_field() {
 fn test_dialog_down_wraps_from_last_to_first() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
-    app.create_dialog.field = 8; // Create button (last position)
+    app.create_dialog.field = 7; // Create button (last position)
     handle_event(&mut app, key_press(KeyCode::Down));
     assert_eq!(app.create_dialog.field, 0);
 }
@@ -1652,7 +1786,7 @@ fn test_dialog_up_wraps_from_first_to_last() {
     app.create_dialog = CreateDialog::open();
     app.create_dialog.field = 0;
     handle_event(&mut app, key_press(KeyCode::Up));
-    assert_eq!(app.create_dialog.field, 8); // Create button
+    assert_eq!(app.create_dialog.field, 7); // Create button
 }
 
 // ── dialog: digit-only filtering for CPUs and Memory ────────────────────
@@ -1684,7 +1818,7 @@ fn test_dialog_cpus_rejects_letters() {
 fn test_dialog_memory_accepts_digits() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
-    app.create_dialog.field = 3; // Memory
+    app.create_dialog.field = 4; // Memory
     app.create_dialog.memory.clear();
     handle_event(&mut app, key_press(KeyCode::Char('2')));
     assert_eq!(app.create_dialog.memory, "2");
@@ -1695,7 +1829,7 @@ fn test_dialog_memory_accepts_digits() {
 fn test_dialog_memory_rejects_letters() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
-    app.create_dialog.field = 3; // Memory
+    app.create_dialog.field = 4; // Memory
     handle_event(&mut app, key_press(KeyCode::Char('m')));
     assert_eq!(app.create_dialog.memory, "512");
     assert!(app.create_dialog.error.is_some());

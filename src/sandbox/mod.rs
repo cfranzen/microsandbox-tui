@@ -7,6 +7,7 @@ use futures::Stream;
 use microsandbox::logs::{LogStreamOptions, LogStreamStart};
 use microsandbox::sandbox::{FsEntryKind, LogEntry, LogOptions, LogSource, MAX_SANDBOX_LIST_LIMIT};
 use microsandbox::{MicrosandboxError, NetworkPolicy, Sandbox, SandboxMetrics, Volume, VolumeKind};
+use microsandbox_network::policy::DestinationGroup as SdkDestGroup;
 use microsandbox_types::VolumeMount;
 
 // Re-export for use in other modules
@@ -77,14 +78,26 @@ impl NetRuleAction {
             NetRuleAction::Deny => "DENY",
         }
     }
+
+    /// Cycle to the next value, wrapping around.
+    pub fn cycle(self) -> Self {
+        match self {
+            NetRuleAction::Allow => NetRuleAction::Deny,
+            NetRuleAction::Deny => NetRuleAction::Allow,
+        }
+    }
 }
 
 /// Traffic direction a [`NetworkRule`] applies to.
+///
+/// `Any` applies the rule in both the egress and ingress evaluators (see
+/// the SDK's `RuleBuilder::any()`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NetRuleDirection {
     #[default]
     Egress,
     Ingress,
+    Any,
 }
 
 impl NetRuleDirection {
@@ -92,18 +105,223 @@ impl NetRuleDirection {
         match self {
             NetRuleDirection::Egress => "EGRESS",
             NetRuleDirection::Ingress => "INGRESS",
+            NetRuleDirection::Any => "ANY",
+        }
+    }
+
+    /// Cycle to the next value, wrapping around.
+    pub fn cycle(self) -> Self {
+        match self {
+            NetRuleDirection::Egress => NetRuleDirection::Ingress,
+            NetRuleDirection::Ingress => NetRuleDirection::Any,
+            NetRuleDirection::Any => NetRuleDirection::Egress,
         }
     }
 }
 
-/// A single CIDR-based network policy rule configured at sandbox-creation
-/// time (the SDK does not support modifying network policy on an already
-/// created sandbox — see [`create_sandbox`]'s use of this type).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A transport/network-layer protocol filter for a [`NetworkRule`].
+///
+/// ICMP protocols are egress-only in the SDK: attaching one to an
+/// `Ingress`-direction rule fails policy validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetRuleProtocol {
+    Tcp,
+    Udp,
+    Icmpv4,
+    Icmpv6,
+}
+
+impl NetRuleProtocol {
+    pub const ALL: [NetRuleProtocol; 4] = [
+        NetRuleProtocol::Tcp,
+        NetRuleProtocol::Udp,
+        NetRuleProtocol::Icmpv4,
+        NetRuleProtocol::Icmpv6,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            NetRuleProtocol::Tcp => "TCP",
+            NetRuleProtocol::Udp => "UDP",
+            NetRuleProtocol::Icmpv4 => "ICMPv4",
+            NetRuleProtocol::Icmpv6 => "ICMPv6",
+        }
+    }
+
+    /// True for the two ICMP variants, which the SDK only allows on
+    /// egress (or "any"-direction, egress side) rules.
+    pub fn is_icmp(self) -> bool {
+        matches!(self, NetRuleProtocol::Icmpv4 | NetRuleProtocol::Icmpv6)
+    }
+}
+
+/// One of the SDK's pre-defined destination groups (see
+/// `microsandbox_network::policy::DestinationGroup`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NetRuleDestGroup {
+    #[default]
+    Public,
+    Loopback,
+    Private,
+    LinkLocal,
+    Metadata,
+    Multicast,
+    Host,
+}
+
+impl NetRuleDestGroup {
+    pub const ALL: [NetRuleDestGroup; 7] = [
+        NetRuleDestGroup::Public,
+        NetRuleDestGroup::Loopback,
+        NetRuleDestGroup::Private,
+        NetRuleDestGroup::LinkLocal,
+        NetRuleDestGroup::Metadata,
+        NetRuleDestGroup::Multicast,
+        NetRuleDestGroup::Host,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            NetRuleDestGroup::Public => "Public",
+            NetRuleDestGroup::Loopback => "Loopback",
+            NetRuleDestGroup::Private => "Private",
+            NetRuleDestGroup::LinkLocal => "Link-Local",
+            NetRuleDestGroup::Metadata => "Metadata",
+            NetRuleDestGroup::Multicast => "Multicast",
+            NetRuleDestGroup::Host => "Host",
+        }
+    }
+
+    /// Cycle to the next value, wrapping around.
+    pub fn cycle(self) -> Self {
+        let idx = Self::ALL.iter().position(|g| *g == self).unwrap_or(0);
+        Self::ALL[(idx + 1) % Self::ALL.len()]
+    }
+
+    fn to_sdk(self) -> SdkDestGroup {
+        match self {
+            NetRuleDestGroup::Public => SdkDestGroup::Public,
+            NetRuleDestGroup::Loopback => SdkDestGroup::Loopback,
+            NetRuleDestGroup::Private => SdkDestGroup::Private,
+            NetRuleDestGroup::LinkLocal => SdkDestGroup::LinkLocal,
+            NetRuleDestGroup::Metadata => SdkDestGroup::Metadata,
+            NetRuleDestGroup::Multicast => SdkDestGroup::Multicast,
+            NetRuleDestGroup::Host => SdkDestGroup::Host,
+        }
+    }
+}
+
+/// What kind of destination a [`NetworkRule`] matches against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NetRuleDestKind {
+    /// Matches any destination.
+    #[default]
+    Any,
+    /// A single IP address.
+    Ip,
+    /// A CIDR block.
+    Cidr,
+    /// An exact domain name (matched via the DNS-resolved-hostname cache).
+    Domain,
+    /// A domain and all of its subdomains.
+    DomainSuffix,
+    /// A pre-defined destination group (see [`NetRuleDestGroup`]).
+    Group,
+}
+
+impl NetRuleDestKind {
+    pub const ALL: [NetRuleDestKind; 6] = [
+        NetRuleDestKind::Any,
+        NetRuleDestKind::Ip,
+        NetRuleDestKind::Cidr,
+        NetRuleDestKind::Domain,
+        NetRuleDestKind::DomainSuffix,
+        NetRuleDestKind::Group,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            NetRuleDestKind::Any => "Any",
+            NetRuleDestKind::Ip => "IP",
+            NetRuleDestKind::Cidr => "CIDR",
+            NetRuleDestKind::Domain => "Domain",
+            NetRuleDestKind::DomainSuffix => "Domain Suffix",
+            NetRuleDestKind::Group => "Group",
+        }
+    }
+
+    /// Cycle to the next value, wrapping around.
+    pub fn cycle(self) -> Self {
+        let idx = Self::ALL.iter().position(|k| *k == self).unwrap_or(0);
+        Self::ALL[(idx + 1) % Self::ALL.len()]
+    }
+
+    /// True when this kind needs a free-text value (IP/CIDR/domain name).
+    pub fn needs_text_value(self) -> bool {
+        matches!(
+            self,
+            NetRuleDestKind::Ip
+                | NetRuleDestKind::Cidr
+                | NetRuleDestKind::Domain
+                | NetRuleDestKind::DomainSuffix
+        )
+    }
+}
+
+/// A single network policy rule configured at sandbox-creation time (the
+/// SDK does not support modifying network policy on an already created
+/// sandbox — see [`create_sandbox`]'s use of this type).
+///
+/// Mirrors the full expressiveness of the SDK's `RuleBuilder`: any
+/// direction, any destination kind (including pre-defined groups, exact
+/// IPs/CIDRs, and domain/domain-suffix matches), an optional protocol
+/// filter, and an optional guest-side port or port range.
+#[derive(Debug, Clone, PartialEq)]
 pub struct NetworkRule {
-    pub cidr: String,
-    pub action: NetRuleAction,
     pub direction: NetRuleDirection,
+    pub action: NetRuleAction,
+    pub dest_kind: NetRuleDestKind,
+    /// Free-text destination value, used when `dest_kind` is `Ip`, `Cidr`,
+    /// `Domain`, or `DomainSuffix`.
+    pub dest_value: String,
+    /// Destination group, used when `dest_kind` is `Group`.
+    pub dest_group: NetRuleDestGroup,
+    /// Protocol filter; empty means "any protocol".
+    pub protocols: Vec<NetRuleProtocol>,
+    /// Guest-side port or port range filter; `None` means "any port".
+    pub port_range: Option<(u16, u16)>,
+}
+
+impl NetworkRule {
+    /// One-line human-readable summary shown in the create-dialog's
+    /// network-rules list.
+    pub fn summary(&self) -> String {
+        let dest = match self.dest_kind {
+            NetRuleDestKind::Any => "any".to_owned(),
+            NetRuleDestKind::Group => self.dest_group.label().to_owned(),
+            _ => self.dest_value.clone(),
+        };
+        let proto = if self.protocols.is_empty() {
+            "any proto".to_owned()
+        } else {
+            self.protocols
+                .iter()
+                .map(|p| p.label())
+                .collect::<Vec<_>>()
+                .join("+")
+        };
+        let ports = match self.port_range {
+            None => "any port".to_owned(),
+            Some((lo, hi)) if lo == hi => format!("port {lo}"),
+            Some((lo, hi)) => format!("ports {lo}-{hi}"),
+        };
+        format!(
+            "{} {} {} [{proto}, {ports}]",
+            self.direction.label(),
+            self.action.label(),
+            dest
+        )
+    }
 }
 
 /// Where a volume mount's data comes from.
@@ -196,6 +414,74 @@ pub struct VolumeInfo {
     pub used_bytes: u64,
 }
 
+/// Which kind of host pattern an allowed/passthrough host entry uses (see
+/// `microsandbox_network::secrets::config::HostPattern`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SecretHostKind {
+    /// Exact hostname match.
+    #[default]
+    Exact,
+    /// Wildcard suffix match, e.g. `*.example.com`.
+    Wildcard,
+    /// Matches every host. Dangerous — disables host-based protection.
+    Any,
+}
+
+/// One allowed-host entry for a [`SecretConfig`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecretHostPattern {
+    pub kind: SecretHostKind,
+    /// Hostname or wildcard pattern (e.g. `api.openai.com` or
+    /// `*.googleapis.com`). Empty when `kind` is `Any`.
+    pub value: String,
+}
+
+/// A single secret entry configured at sandbox-creation time, mirroring the
+/// SDK's `SecretBuilder`: an environment variable that exposes a
+/// placeholder inside the guest, the real value it's substituted for, the
+/// hosts allowed to receive that value, and the injection scopes the TLS
+/// proxy substitutes it in.
+///
+/// Adding any secret automatically enables TLS interception for the
+/// sandbox (matching `SandboxBuilder::secret`'s behaviour).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecretConfig {
+    /// Environment variable name the guest sees the placeholder as.
+    pub env_var: String,
+    /// The real secret value, only ever revealed to allowed hosts via the
+    /// TLS proxy — never exposed to the guest.
+    pub value: String,
+    /// Hosts allowed to receive the real value. At least one is required.
+    pub allowed_hosts: Vec<SecretHostPattern>,
+    /// Substitute in HTTP headers (default: true).
+    pub inject_headers: bool,
+    /// Substitute inside decoded HTTP Basic Auth credentials (default: true).
+    pub inject_basic_auth: bool,
+    /// Substitute in URL query parameters (default: false).
+    pub inject_query: bool,
+    /// Substitute in HTTP/1 request bodies (default: false).
+    pub inject_body: bool,
+    /// Require a verified TLS identity before substituting (default: true).
+    pub require_tls_identity: bool,
+}
+
+impl SecretConfig {
+    /// One-line human-readable summary shown in the create-dialog's
+    /// secrets list.
+    pub fn summary(&self) -> String {
+        let hosts = self
+            .allowed_hosts
+            .iter()
+            .map(|h| match h.kind {
+                SecretHostKind::Any => "*".to_owned(),
+                _ => h.value.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("{}=****** -> {hosts}", self.env_var)
+    }
+}
+
 /// All parameters for creating a new sandbox via the TUI dialog.
 #[derive(Debug, Clone)]
 pub struct CreateConfig {
@@ -212,12 +498,14 @@ pub struct CreateConfig {
     pub max_cpus: Option<u8>,
     pub max_memory_mib: Option<u32>,
     pub disable_network: bool,
-    /// CIDR-based network policy rules applied at creation time. Ignored
-    /// (with `disable_network` taking precedence) when empty.
+    /// Network policy rules applied at creation time. Ignored (with
+    /// `disable_network` taking precedence) when empty.
     pub network_rules: Vec<NetworkRule>,
     /// Volume mounts applied at creation time. Existing sandboxes cannot
     /// have their mounts changed post-creation per the current SDK.
     pub mounts: Vec<VolumeMountConfig>,
+    /// Secrets injected at creation time via the TLS proxy.
+    pub secrets: Vec<SecretConfig>,
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -321,34 +609,70 @@ pub async fn remove_sandbox(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Build a [`NetworkPolicy`] from a list of user-configured CIDR rules.
+/// Build a [`NetworkPolicy`] from the user-configured rule list.
 ///
 /// Starts from an allow-all default (matching the sandbox's normal
-/// networking behaviour) and layers explicit egress/ingress allow/deny
-/// rules on top, evaluated in order. Falls back to [`NetworkPolicy::allow_all`]
-/// if any rule fails to parse (this shouldn't happen — the create dialog
-/// validates CIDR syntax before an entry is added).
-fn build_network_policy(rules: &[NetworkRule]) -> NetworkPolicy {
+/// networking behaviour) and layers explicit rules on top, each evaluated
+/// first-match-wins, exactly mirroring the SDK's `NetworkPolicyBuilder`.
+/// Propagates the first [`microsandbox_network::policy::BuildError`]
+/// encountered (e.g. an ICMP protocol on an ingress-direction rule) as an
+/// `anyhow` error rather than silently discarding the user's rules.
+fn build_network_policy(rules: &[NetworkRule]) -> Result<NetworkPolicy> {
     let mut builder = NetworkPolicy::builder().default_allow();
     for rule in rules {
-        let cidr = rule.cidr.clone();
-        let direction = rule.direction;
-        let action = rule.action;
+        let rule = rule.clone();
         builder = builder.rule(move |r| {
-            let r = match direction {
-                NetRuleDirection::Egress => r.egress(),
-                NetRuleDirection::Ingress => r.ingress(),
-            };
-            let dest = match action {
+            match rule.direction {
+                NetRuleDirection::Egress => {
+                    r.egress();
+                }
+                NetRuleDirection::Ingress => {
+                    r.ingress();
+                }
+                NetRuleDirection::Any => {
+                    r.any();
+                }
+            }
+            for proto in &rule.protocols {
+                match proto {
+                    NetRuleProtocol::Tcp => {
+                        r.tcp();
+                    }
+                    NetRuleProtocol::Udp => {
+                        r.udp();
+                    }
+                    NetRuleProtocol::Icmpv4 => {
+                        r.icmpv4();
+                    }
+                    NetRuleProtocol::Icmpv6 => {
+                        r.icmpv6();
+                    }
+                }
+            }
+            if let Some((lo, hi)) = rule.port_range {
+                if lo == hi {
+                    r.port(lo);
+                } else {
+                    r.port_range(lo, hi);
+                }
+            }
+            let dest = match rule.action {
                 NetRuleAction::Allow => r.allow(),
                 NetRuleAction::Deny => r.deny(),
             };
-            dest.cidr(cidr)
+            match rule.dest_kind {
+                NetRuleDestKind::Any => dest.any(),
+                NetRuleDestKind::Ip => dest.ip(rule.dest_value.clone()),
+                NetRuleDestKind::Cidr => dest.cidr(rule.dest_value.clone()),
+                NetRuleDestKind::Domain => dest.domain(rule.dest_value.clone()),
+                NetRuleDestKind::DomainSuffix => dest.domain_suffix(rule.dest_value.clone()),
+                NetRuleDestKind::Group => dest.group(rule.dest_group.to_sdk()),
+            }
         });
     }
     builder
         .build()
-        .unwrap_or_else(|_| NetworkPolicy::allow_all())
+        .map_err(|e| anyhow::anyhow!("network rule error: {e}"))
 }
 
 /// Create and immediately detach a new sandbox using the given configuration.
@@ -386,7 +710,8 @@ pub async fn create_sandbox(cfg: &CreateConfig) -> Result<()> {
     if cfg.disable_network {
         builder = builder.disable_network();
     } else if !cfg.network_rules.is_empty() {
-        builder = builder.network(|n| n.policy(build_network_policy(&cfg.network_rules)));
+        let policy = build_network_policy(&cfg.network_rules)?;
+        builder = builder.network(|n| n.policy(policy));
     }
 
     for mount in &cfg.mounts {
@@ -401,6 +726,25 @@ pub async fn create_sandbox(cfg: &CreateConfig) -> Result<()> {
                 builder.volume(guest_path, |m| m.named(name))
             }
         };
+    }
+
+    for secret in &cfg.secrets {
+        let secret = secret.clone();
+        builder = builder.secret(move |s| {
+            let mut s = s.env(secret.env_var).value(secret.value);
+            for host in &secret.allowed_hosts {
+                s = match host.kind {
+                    SecretHostKind::Exact => s.allow_host(host.value.clone()),
+                    SecretHostKind::Wildcard => s.allow_host_pattern(host.value.clone()),
+                    SecretHostKind::Any => s.allow_any_host_dangerous(true),
+                };
+            }
+            s.inject_headers(secret.inject_headers)
+                .inject_basic_auth(secret.inject_basic_auth)
+                .inject_query(secret.inject_query)
+                .inject_body(secret.inject_body)
+                .require_tls_identity(secret.require_tls_identity)
+        });
     }
 
     let sb = builder.create().await?;
@@ -824,6 +1168,18 @@ mod tests {
 
     // ── NetworkRule / build_network_policy ──────────────────────────────────
 
+    fn cidr_rule(cidr: &str, action: NetRuleAction, direction: NetRuleDirection) -> NetworkRule {
+        NetworkRule {
+            direction,
+            action,
+            dest_kind: NetRuleDestKind::Cidr,
+            dest_value: cidr.to_owned(),
+            dest_group: NetRuleDestGroup::default(),
+            protocols: Vec::new(),
+            port_range: None,
+        }
+    }
+
     #[test]
     fn test_net_rule_action_label() {
         assert_eq!(NetRuleAction::Allow.label(), "ALLOW");
@@ -834,11 +1190,38 @@ mod tests {
     fn test_net_rule_direction_label() {
         assert_eq!(NetRuleDirection::Egress.label(), "EGRESS");
         assert_eq!(NetRuleDirection::Ingress.label(), "INGRESS");
+        assert_eq!(NetRuleDirection::Any.label(), "ANY");
+    }
+
+    #[test]
+    fn test_net_rule_dest_kind_cycle_wraps() {
+        let mut kind = NetRuleDestKind::Any;
+        for _ in 0..NetRuleDestKind::ALL.len() {
+            kind = kind.cycle();
+        }
+        assert_eq!(kind, NetRuleDestKind::Any);
+    }
+
+    #[test]
+    fn test_net_rule_dest_group_cycle_wraps() {
+        let mut group = NetRuleDestGroup::Public;
+        for _ in 0..NetRuleDestGroup::ALL.len() {
+            group = group.cycle();
+        }
+        assert_eq!(group, NetRuleDestGroup::Public);
+    }
+
+    #[test]
+    fn test_net_rule_protocol_is_icmp() {
+        assert!(NetRuleProtocol::Icmpv4.is_icmp());
+        assert!(NetRuleProtocol::Icmpv6.is_icmp());
+        assert!(!NetRuleProtocol::Tcp.is_icmp());
+        assert!(!NetRuleProtocol::Udp.is_icmp());
     }
 
     #[test]
     fn test_build_network_policy_empty_is_allow_all() {
-        let policy = build_network_policy(&[]);
+        let policy = build_network_policy(&[]).expect("build should succeed");
         let allow_all = NetworkPolicy::allow_all();
         assert_eq!(policy.default_egress, allow_all.default_egress);
         assert_eq!(policy.default_ingress, allow_all.default_ingress);
@@ -846,20 +1229,68 @@ mod tests {
     }
 
     #[test]
-    fn test_build_network_policy_with_rules() {
+    fn test_build_network_policy_with_cidr_rules() {
         let rules = vec![
-            NetworkRule {
-                cidr: "10.0.0.0/8".into(),
-                action: NetRuleAction::Deny,
-                direction: NetRuleDirection::Egress,
-            },
-            NetworkRule {
-                cidr: "192.168.0.0/16".into(),
-                action: NetRuleAction::Allow,
-                direction: NetRuleDirection::Ingress,
-            },
+            cidr_rule("10.0.0.0/8", NetRuleAction::Deny, NetRuleDirection::Egress),
+            cidr_rule(
+                "192.168.0.0/16",
+                NetRuleAction::Allow,
+                NetRuleDirection::Ingress,
+            ),
         ];
-        let policy = build_network_policy(&rules);
+        let policy = build_network_policy(&rules).expect("build should succeed");
         assert_eq!(policy.rules.len(), 2);
+    }
+
+    #[test]
+    fn test_build_network_policy_with_group_and_protocols() {
+        let rules = vec![NetworkRule {
+            direction: NetRuleDirection::Egress,
+            action: NetRuleAction::Allow,
+            dest_kind: NetRuleDestKind::Group,
+            dest_value: String::new(),
+            dest_group: NetRuleDestGroup::Public,
+            protocols: vec![NetRuleProtocol::Tcp],
+            port_range: Some((443, 443)),
+        }];
+        let policy = build_network_policy(&rules).expect("build should succeed");
+        assert_eq!(policy.rules.len(), 1);
+    }
+
+    #[test]
+    fn test_build_network_policy_rejects_icmp_on_ingress() {
+        let rules = vec![NetworkRule {
+            direction: NetRuleDirection::Ingress,
+            action: NetRuleAction::Allow,
+            dest_kind: NetRuleDestKind::Any,
+            dest_value: String::new(),
+            dest_group: NetRuleDestGroup::default(),
+            protocols: vec![NetRuleProtocol::Icmpv4],
+            port_range: None,
+        }];
+        assert!(build_network_policy(&rules).is_err());
+    }
+
+    // ── SecretConfig ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_secret_config_summary_redacts_value() {
+        let secret = SecretConfig {
+            env_var: "OPENAI_API_KEY".into(),
+            value: "sk-super-secret".into(),
+            allowed_hosts: vec![SecretHostPattern {
+                kind: SecretHostKind::Exact,
+                value: "api.openai.com".into(),
+            }],
+            inject_headers: true,
+            inject_basic_auth: true,
+            inject_query: false,
+            inject_body: false,
+            require_tls_identity: true,
+        };
+        let summary = secret.summary();
+        assert!(!summary.contains("sk-super-secret"));
+        assert!(summary.contains("OPENAI_API_KEY"));
+        assert!(summary.contains("api.openai.com"));
     }
 }

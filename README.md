@@ -34,19 +34,30 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
   with live metrics: CPU and memory gauges with rolling sparkline history (last 60
   samples), a writable-overlay disk usage gauge (when reported by the sandbox), disk I/O
   counters, network rx/tx, and uptime
-- **Create dialog** — two-tab modal covering all
+- **Create dialog** — four-tab modal covering all
   [SandboxConfig](https://docs.microsandbox.dev/sdk/rust/sandbox#sandboxconfig) options:
-  - **Basic tab**: Name, Image, CPUs, Memory, Port mappings, Environment variables,
-    Working directory (with interactive directory picker — the picked host directory is
-    automatically bind-mounted into the sandbox at the equivalent guest path, so the
-    guest sees it at "the same" location; Windows drive paths like `D:\foo\bar` are
-    translated to `/d/foo/bar`), Volume mounts (bind-mount a
-    host directory or attach a named volume — applied only when the sandbox is created;
-    the SDK does not support changing mounts on an already-running sandbox)
-  - **Advanced tab**: Hostname, User, Shell, Max CPUs, Max Memory, Disable network toggle,
-    Network policy rules (add/remove CIDR-based allow/deny rules for egress/ingress
-    traffic — applied only when the sandbox is created; the SDK does not support
-    changing network policy on an already-running sandbox)
+  - **Basic tab**: Name, Image, CPUs / Max CPUs (side by side), Memory / Max Memory
+    (side by side), Working directory (with interactive directory picker — the picked
+    host directory is automatically bind-mounted into the sandbox at the equivalent
+    guest path, so the guest sees it at "the same" location; Windows drive paths like
+    `D:\foo\bar` are translated to `/d/foo/bar`)
+  - **Guest OS tab**: Hostname, User, Shell, Environment variables (inline list, `a` to
+    add via a popup, `d` to delete the selected entry), Volume mounts (inline list, bind
+    a host directory or attach a named volume — applied only when the sandbox is
+    created; the SDK does not support changing mounts on an already-running sandbox)
+  - **Network tab**: Disable network toggle, Port mappings (inline list), Network policy
+    rules (inline list) — supports the full range of the SDK's
+    [network policy](https://docs.microsandbox.dev/sdk/rust/networking) options: Egress /
+    Ingress / Any direction, Allow / Deny action, and Any / IP / CIDR / Domain / Domain
+    suffix / Group destination kinds, with optional protocol (TCP/UDP/ICMP) and port
+    range filters — applied only when the sandbox is created; the SDK does not support
+    changing network policy on an already-running sandbox
+  - **Secrets tab**: Injected secrets (inline list) — each secret maps an environment
+    variable name to a value, a set of allowed hosts, and which
+    [injection surfaces](https://docs.microsandbox.dev/sdk/rust/secrets) (HTTP headers,
+    HTTP basic auth, query parameters, request body) it may be injected into, plus an
+    optional "require TLS + verified peer identity" flag — applied only when the sandbox
+    is created; the SDK does not support changing secrets on an already-running sandbox
 - **Volumes view** (`v`) — list, create, and remove named persistent volumes directly
   via the SDK, independent of any particular sandbox
 - **Auto-refresh** — sandbox list and detail data refresh automatically every 3 seconds
@@ -110,44 +121,45 @@ active, so it never interferes with those modal flows.
 | Key | Action |
 |-----|--------|
 | `Tab` / `↑` / `↓` | Move between fields |
-| `◄` / `►` | Switch between Basic and Advanced tabs |
-| `Space` | Toggle boolean fields (e.g. Disable Network) |
+| `◄` / `►` | Switch between Basic / Guest OS / Network / Secrets tabs |
+| `Space` | Toggle boolean fields (e.g. Disable Network, injection toggles) |
 | `Ctrl-F` | Open directory picker (Workdir field) |
-| `Enter` | Create sandbox (or open the focused field's manage dialog: Ports, Env Vars, Mounts, Net Rules) |
-| `Esc` | Close dialog |
+| `↑` / `↓` | Move selection within a focused inline list (Env Vars, Mounts, Ports, Net Rules, Secrets) |
+| `a` | Add a new entry to the focused inline list (opens an Add popup) |
+| `d` / `Delete` | Delete the selected entry from the focused inline list |
+| `Enter` | Create sandbox, or (when a list is focused) open its Add popup, or (inside an Add popup) advance to the next field / submit on the last field |
+| `Esc` | Close dialog / cancel the open Add popup |
 
-### Network Rules dialog
+### Network Rules add dialog
 
-Reached from the Advanced tab's "Net Rules" field. Lets you build a CIDR-based network
-policy applied at sandbox-creation time (existing sandboxes cannot have their network
-policy changed post-creation — this is a current limitation of the microsandbox SDK).
-
-| Key | Action |
-|-----|--------|
-| `↑` / `↓` | Select a rule |
-| `a` | Add a new rule |
-| `d` / `Delete` | Delete the selected rule |
-| `e` / `i` | Choose Egress / Ingress direction (Add mode) |
-| `Space` | Toggle Allow / Deny action (Add mode) |
-| `Enter` | Confirm the CIDR and add the rule (Add mode) / close dialog (List mode) |
-| `Esc` | Cancel add / close dialog |
-
-### Volume Mounts dialog
-
-Reached from the Basic tab's "Mounts" field. Lets you add bind mounts (host directory)
-or named-volume mounts, applied at sandbox-creation time (existing sandboxes cannot have
-their mounts changed post-creation — this is a current limitation of the microsandbox
-SDK).
+Reached by pressing `a` on the Network tab's "Net Rules" list. Lets you build a network
+policy rule applied at sandbox-creation time (existing sandboxes cannot have their
+network policy changed post-creation — this is a current limitation of the microsandbox
+SDK). See the SDK's [networking docs](https://docs.microsandbox.dev/sdk/rust/networking)
+for the full semantics.
 
 | Key | Action |
 |-----|--------|
-| `↑` / `↓` | Select a mount |
-| `a` | Add a new mount |
-| `d` / `Delete` | Delete the selected mount |
-| `Tab` / `↑` / `↓` | Move between the guest-path and source fields (Add mode) |
-| `b` / `n` | Choose bind mount / named volume source kind (Add mode) |
-| `Enter` | Confirm the mount (Add mode) / close dialog (List mode) |
-| `Esc` | Cancel add / close dialog |
+| `◄` / `►` / `Space` | Cycle Direction (Egress / Ingress / Any) |
+| `Space` | Cycle Action (Allow / Deny) or Destination kind (Any / IP / CIDR / Domain / Domain suffix / Group), or toggle the focused protocol checkbox (TCP / UDP / ICMP) |
+| `◄` / `►` | Move the cursor between protocol checkboxes |
+| `Tab` / `↑` / `↓` | Move between fields |
+| `Enter` | Advance to the next field, or add the rule when on the last field (Ports) |
+| `Esc` | Cancel and close the popup |
+
+### Volume Mounts add dialog
+
+Reached by pressing `a` on the Guest OS tab's "Mounts" list. Lets you add bind mounts
+(host directory) or named-volume mounts, applied at sandbox-creation time (existing
+sandboxes cannot have their mounts changed post-creation — this is a current limitation
+of the microsandbox SDK).
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `↑` / `↓` | Move between the guest-path and source fields |
+| `b` / `n` | Choose bind mount / named volume source kind |
+| `Enter` | Advance to the next field, or add the mount when on the last field |
+| `Esc` | Cancel and close the popup |
 
 ### Volumes view
 

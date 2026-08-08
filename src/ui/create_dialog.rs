@@ -8,8 +8,17 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, DialogTab, SubDialogMode, DRIVES_ENTRY, PICKER_VISIBLE_ROWS};
+use crate::app::{App, DialogTab, MountKindChoice, DRIVES_ENTRY, PICKER_VISIBLE_ROWS};
+use crate::sandbox::{MountSource, NetRuleDestKind, NetworkRule, SecretConfig, VolumeMountConfig};
 use crate::theme::Theme;
+
+/// Number of entries shown at once inside an inline scrollable list field
+/// (Env Vars, Mounts, Ports, Net Rules, Secrets).
+const VISIBLE_LIST_ROWS: u16 = 4;
+/// Height of a plain single-line bordered text/toggle field.
+const FIELD_HEIGHT: u16 = 3;
+/// Height of a bordered inline list field: border(2) + entries + hint(1).
+const LIST_HEIGHT: u16 = VISIBLE_LIST_ROWS + 3;
 
 /// Render the create-sandbox dialog centred over the full terminal area.
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
@@ -19,7 +28,38 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let popup = centred_rect(65, 30, area);
+    // Per-tab visual row heights. Every tab is a 1:1 field-to-row mapping
+    // except Basic, where CPUs/Max CPUs and Memory/Max Memory each share a
+    // row (see `render` below for the pairing).
+    let row_heights: &[u16] = match dlg.tab {
+        DialogTab::Basic => &[
+            FIELD_HEIGHT, // name
+            FIELD_HEIGHT, // image
+            FIELD_HEIGHT, // cpus / max cpus
+            FIELD_HEIGHT, // memory / max memory
+            FIELD_HEIGHT, // workdir
+        ],
+        DialogTab::GuestOs => &[
+            FIELD_HEIGHT, // hostname
+            FIELD_HEIGHT, // user
+            FIELD_HEIGHT, // shell
+            LIST_HEIGHT,  // env vars
+            LIST_HEIGHT,  // mounts
+        ],
+        DialogTab::Network => &[
+            FIELD_HEIGHT, // no net
+            LIST_HEIGHT,  // ports
+            LIST_HEIGHT,  // network rules
+        ],
+        DialogTab::Secrets => &[
+            LIST_HEIGHT, // secrets
+        ],
+    };
+    let content_height: u16 = row_heights.iter().sum();
+    // borders(2) + tab bar(1) + spacer(1) + content + create button(1) + hint/error(1)
+    let popup_height = 6 + content_height;
+
+    let popup = centred_rect(70, popup_height, area);
     f.render_widget(Clear, popup);
 
     let block = Block::default()
@@ -33,10 +73,8 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
-    // Layout: tab bar + separator + form fields + Create button + hint/error
-    let form_fields = dlg.form_field_count();
     let mut constraints = vec![Constraint::Length(1), Constraint::Length(1)];
-    constraints.extend(std::iter::repeat_n(Constraint::Length(3), form_fields));
+    constraints.extend(row_heights.iter().map(|h| Constraint::Length(*h)));
     constraints.push(Constraint::Length(1)); // Create button
     constraints.push(Constraint::Length(1)); // hint / error
 
@@ -49,9 +87,6 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
 
     match dlg.tab {
         DialogTab::Basic => {
-            let ports_summary = format_ports_summary(&dlg.ports);
-            let env_summary = format_env_vars_summary(&dlg.env_vars);
-            let mounts_summary = format_mounts_summary(&dlg.mounts);
             let workdir_summary = if dlg.workdir.is_empty() {
                 "(none)".into()
             } else {
@@ -59,23 +94,27 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             };
             render_field(f, theme, "Name    ", &dlg.name, dlg.field == 0, chunks[2]);
             render_field(f, theme, "Image   ", &dlg.image, dlg.field == 1, chunks[3]);
-            render_field(f, theme, "CPUs    ", &dlg.cpus, dlg.field == 2, chunks[4]);
-            render_field(f, theme, "Memory  ", &dlg.memory, dlg.field == 3, chunks[5]);
-            render_managed_field(
+            render_field_pair(
                 f,
                 theme,
-                "Ports   ",
-                &ports_summary,
-                dlg.field == 4,
-                chunks[6],
+                "CPUs    ",
+                &dlg.cpus,
+                dlg.field == 2,
+                "Max CPUs",
+                &dlg.max_cpus,
+                dlg.field == 3,
+                chunks[4],
             );
-            render_managed_field(
+            render_field_pair(
                 f,
                 theme,
-                "Env Vars",
-                &env_summary,
+                "Memory  ",
+                &dlg.memory,
+                dlg.field == 4,
+                "Max Mem ",
+                &dlg.max_memory,
                 dlg.field == 5,
-                chunks[7],
+                chunks[5],
             );
             render_managed_field_with_hint(
                 f,
@@ -84,19 +123,10 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 &workdir_summary,
                 "browse",
                 dlg.field == 6,
-                chunks[8],
-            );
-            render_managed_field(
-                f,
-                theme,
-                "Mounts  ",
-                &mounts_summary,
-                dlg.field == 7,
-                chunks[9],
+                chunks[6],
             );
         }
-        DialogTab::Advanced => {
-            let rules_summary = format_network_rules_summary(&dlg.network_rules);
+        DialogTab::GuestOs => {
             render_field(
                 f,
                 theme,
@@ -107,74 +137,99 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             );
             render_field(f, theme, "User    ", &dlg.user, dlg.field == 1, chunks[3]);
             render_field(f, theme, "Shell   ", &dlg.shell, dlg.field == 2, chunks[4]);
-            render_field(
+            render_list_field(
                 f,
                 theme,
-                "Max CPUs",
-                &dlg.max_cpus,
+                "Env Vars",
+                &dlg.env_vars,
+                dlg.env_vars_selected,
                 dlg.field == 3,
+                |(k, v)| format!("{k}={v}"),
                 chunks[5],
             );
-            render_field(
+            render_list_field(
                 f,
                 theme,
-                "Max Mem ",
-                &dlg.max_memory,
+                "Mounts  ",
+                &dlg.mounts,
+                dlg.mounts_selected,
                 dlg.field == 4,
+                format_mount_entry,
                 chunks[6],
             );
+        }
+        DialogTab::Network => {
             render_toggle(
                 f,
                 theme,
                 "No Net  ",
                 dlg.disable_network,
-                dlg.field == 5,
-                chunks[7],
+                dlg.field == 0,
+                chunks[2],
             );
-            render_managed_field_with_hint(
+            render_list_field(
+                f,
+                theme,
+                "Ports   ",
+                &dlg.ports,
+                dlg.ports_selected,
+                dlg.field == 1,
+                |(h, g)| format!("{h} → {g}"),
+                chunks[3],
+            );
+            render_list_field(
                 f,
                 theme,
                 "Net Rules",
-                &rules_summary,
-                "manage",
-                dlg.field == 6,
-                chunks[8],
+                &dlg.network_rules,
+                dlg.network_rules_selected,
+                dlg.field == 2,
+                NetworkRule::summary,
+                chunks[4],
+            );
+        }
+        DialogTab::Secrets => {
+            render_list_field(
+                f,
+                theme,
+                "Secrets ",
+                &dlg.secrets,
+                dlg.secrets_selected,
+                dlg.field == 0,
+                SecretConfig::summary,
+                chunks[2],
             );
         }
     }
 
-    // Create button — always at chunks[2 + form_field_count]
-    let create_chunk = chunks[2 + form_fields];
+    // Create button — always the second-to-last chunk.
+    let create_chunk = chunks[chunks.len() - 2];
     render_create_button(f, theme, dlg.is_create_focused(), create_chunk);
 
-    // Hint / error — always at chunks[2 + form_field_count + 1]
-    let message_chunk = chunks[2 + form_fields + 1];
+    // Hint / error — always the last chunk.
+    let message_chunk = chunks[chunks.len() - 1];
     let hint_pairs: &[(&str, &str)] = if dlg.is_create_focused() {
         &[("Enter", "create sandbox"), ("Esc", "cancel")]
+    } else if dlg.focused_list().is_some() {
+        &[
+            ("Tab/◄►", "navigate"),
+            ("↑↓", "select"),
+            ("a", "add"),
+            ("d", "delete"),
+            ("Esc", "cancel"),
+        ]
     } else {
         match (dlg.tab, dlg.field) {
-            (DialogTab::Basic, 4) | (DialogTab::Basic, 5) | (DialogTab::Basic, 7) => &[
-                ("Tab/↑↓", "navigate"),
-                ("◄►", "tab"),
-                ("Enter", "manage"),
-                ("Esc", "cancel"),
-            ],
             (DialogTab::Basic, 6) => &[
                 ("Tab/↑↓", "navigate"),
                 ("◄►", "tab"),
                 ("Enter", "browse"),
                 ("Esc", "cancel"),
             ],
-            (DialogTab::Advanced, 5) => &[
+            (DialogTab::Network, 0) => &[
                 ("Tab/↑↓", "navigate"),
                 ("◄►", "tab"),
                 ("Space", "toggle"),
-                ("Esc", "cancel"),
-            ],
-            (DialogTab::Advanced, 6) => &[
-                ("Tab/↑↓", "navigate"),
-                ("◄►", "tab"),
-                ("Enter", "manage"),
                 ("Esc", "cancel"),
             ],
             _ => &[("Tab/↑↓", "navigate"), ("◄►", "tab"), ("Esc", "cancel")],
@@ -192,24 +247,29 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     if dlg.dir_picker.visible {
         render_dir_picker(f, app, area);
     }
-    if dlg.ports_dialog.visible {
-        render_ports_dialog(f, app, area);
+    if dlg.port_add.visible {
+        render_port_add_dialog(f, app, area);
     }
-    if dlg.env_vars_dialog.visible {
-        render_env_vars_dialog(f, app, area);
+    if dlg.env_var_add.visible {
+        render_env_var_add_dialog(f, app, area);
     }
-    if dlg.network_rules_dialog.visible {
-        render_network_rules_dialog(f, app, area);
+    if dlg.net_rule_add.visible {
+        render_net_rule_add_dialog(f, app, area);
     }
-    if dlg.mounts_dialog.visible {
-        render_mounts_dialog(f, app, area);
+    if dlg.mount_add.visible {
+        render_mount_add_dialog(f, app, area);
+    }
+    if dlg.secret_add.visible {
+        render_secret_add_dialog(f, app, area);
     }
 }
 
 fn render_tab_bar(f: &mut Frame, theme: &Theme, tab: DialogTab, area: Rect) {
     let labels = [
         (DialogTab::Basic.title(), tab == DialogTab::Basic),
-        (DialogTab::Advanced.title(), tab == DialogTab::Advanced),
+        (DialogTab::GuestOs.title(), tab == DialogTab::GuestOs),
+        (DialogTab::Network.title(), tab == DialogTab::Network),
+        (DialogTab::Secrets.title(), tab == DialogTab::Secrets),
     ];
     let (spans, _) = theme.tab_bar(&labels);
 
@@ -257,6 +317,27 @@ fn render_field(f: &mut Frame, theme: &Theme, label: &str, value: &str, focused:
     );
 }
 
+/// Render two text fields side by side within a single row, e.g. CPUs / Max
+/// CPUs or Memory / Max Memory.
+fn render_field_pair(
+    f: &mut Frame,
+    theme: &Theme,
+    label_a: &str,
+    value_a: &str,
+    focused_a: bool,
+    label_b: &str,
+    value_b: &str,
+    focused_b: bool,
+    area: Rect,
+) {
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
+    render_field(f, theme, label_a, value_a, focused_a, cols[0]);
+    render_field(f, theme, label_b, value_b, focused_b, cols[1]);
+}
+
 fn render_toggle(
     f: &mut Frame,
     theme: &Theme,
@@ -295,6 +376,90 @@ fn render_toggle(
     f.render_widget(Paragraph::new(Span::styled(text, style)), text_area);
 }
 
+/// Render an inline, scrollable list field (Env Vars, Mounts, Ports, Net
+/// Rules, Secrets). The list scrolls automatically to keep the selected
+/// entry visible; when focused, `a`/`d` add/delete entries and Up/Down move
+/// the selection (handled in `keys.rs` via `focused_list()`).
+fn render_list_field<T>(
+    f: &mut Frame,
+    theme: &Theme,
+    label: &str,
+    entries: &[T],
+    selected: usize,
+    focused: bool,
+    format_entry: impl Fn(&T) -> String,
+    area: Rect,
+) {
+    let label_style = if focused {
+        theme.text_bold()
+    } else {
+        theme.muted().add_modifier(Modifier::BOLD)
+    };
+
+    let block = Block::default()
+        .title(Span::styled(format!(" {label} "), label_style))
+        .borders(Borders::ALL)
+        .border_type(theme.border_type(focused))
+        .border_style(theme.border_style(focused));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let rows = inner.height.saturating_sub(1);
+    let list_area = Rect::new(inner.x, inner.y, inner.width, rows);
+    let hint_area = Rect::new(inner.x, inner.y + rows, inner.width, 1);
+
+    if entries.is_empty() {
+        f.render_widget(
+            Paragraph::new(Span::styled(" (none)", theme.muted())),
+            list_area,
+        );
+    } else {
+        let visible = rows as usize;
+        let scroll = if visible > 0 && selected >= visible {
+            selected + 1 - visible
+        } else {
+            0
+        };
+        let end = (scroll + visible).min(entries.len());
+        for (row, idx) in (scroll..end).enumerate() {
+            let is_sel = focused && idx == selected;
+            let style = if is_sel {
+                theme.selected()
+            } else {
+                theme.text()
+            };
+            let max_w = (list_area.width as usize).saturating_sub(2);
+            let text = format_entry(&entries[idx]);
+            let display = if text.chars().count() > max_w {
+                let truncated: String = text.chars().take(max_w.saturating_sub(1)).collect();
+                format!(" {truncated}…")
+            } else {
+                format!(" {text}")
+            };
+            let row_area = Rect::new(list_area.x, list_area.y + row as u16, list_area.width, 1);
+            f.render_widget(Paragraph::new(Span::styled(display, style)), row_area);
+        }
+    }
+
+    let hint_style = if focused {
+        theme.accent()
+    } else {
+        theme.muted()
+    };
+    let hint_text = if focused {
+        " ↑↓ select · a add · d delete"
+    } else if entries.is_empty() {
+        " press Enter/a to add"
+    } else {
+        ""
+    };
+    f.render_widget(
+        Paragraph::new(Span::styled(hint_text, hint_style)),
+        hint_area,
+    );
+}
+
 /// Render the Create Sandbox button at the bottom of the form.
 fn render_create_button(f: &mut Frame, theme: &Theme, focused: bool, area: Rect) {
     // Use a multi-span Line so we can mix styles within a single row.
@@ -322,74 +487,16 @@ fn render_create_button(f: &mut Frame, theme: &Theme, focused: bool, area: Rect)
     f.render_widget(Paragraph::new(line), area);
 }
 
-/// Format a list of port mappings as a compact summary string.
-fn format_ports_summary(ports: &[(u16, u16)]) -> String {
-    if ports.is_empty() {
-        "(none)".into()
-    } else {
-        ports
-            .iter()
-            .map(|(h, g)| format!("{h}:{g}"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-}
-
-/// Format a list of env vars as a compact summary string.
-fn format_env_vars_summary(vars: &[(String, String)]) -> String {
-    if vars.is_empty() {
-        "(none)".into()
-    } else {
-        vars.iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-}
-
-/// Format a list of network policy rules as a compact summary string.
-fn format_network_rules_summary(rules: &[crate::sandbox::NetworkRule]) -> String {
-    if rules.is_empty() {
-        "(none — allow all)".into()
-    } else {
-        rules
-            .iter()
-            .map(|r| format!("{}:{} {}", r.direction.label(), r.action.label(), r.cidr))
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-}
-
-/// Format a list of volume mounts as a compact summary string.
-fn format_mounts_summary(mounts: &[crate::sandbox::VolumeMountConfig]) -> String {
-    use crate::sandbox::MountSource;
-    if mounts.is_empty() {
-        "(none)".into()
-    } else {
-        mounts
-            .iter()
-            .map(|m| match &m.source {
-                MountSource::Bind(host) => format!("{}:{host}", m.guest_path),
-                MountSource::Named(name) => format!("{}:vol({name})", m.guest_path),
-            })
-            .collect::<Vec<_>>()
-            .join(", ")
+/// Format one volume mount entry for the inline Mounts list.
+fn format_mount_entry(mount: &VolumeMountConfig) -> String {
+    match &mount.source {
+        MountSource::Bind(host) => format!("{} <- bind {host}", mount.guest_path),
+        MountSource::Named(name) => format!("{} <- volume {name}", mount.guest_path),
     }
 }
 
 /// Render a read-only field whose value is managed via a sub-dialog or picker.
-/// `action_hint` is shown when focused, e.g. `"manage"` or `"browse"`.
-fn render_managed_field(
-    f: &mut Frame,
-    theme: &Theme,
-    label: &str,
-    summary: &str,
-    focused: bool,
-    area: Rect,
-) {
-    render_managed_field_with_hint(f, theme, label, summary, "manage", focused, area);
-}
-
+/// `action_hint` is shown when focused, e.g. `"browse"`.
 fn render_managed_field_with_hint(
     f: &mut Frame,
     theme: &Theme,
@@ -437,290 +544,138 @@ fn render_managed_field_with_hint(
     f.render_widget(Paragraph::new(Span::styled(text, style)), text_area);
 }
 
-/// Render the ports management sub-dialog.
-fn render_ports_dialog(f: &mut Frame, app: &App, area: Rect) {
-    let dialog = &app.create_dialog.ports_dialog;
+/// Render the "Add Port Mapping" popup.
+fn render_port_add_dialog(f: &mut Frame, app: &App, area: Rect) {
+    let dialog = &app.create_dialog.port_add;
     let theme = &app.theme;
     if !dialog.visible {
         return;
     }
 
-    match dialog.mode {
-        SubDialogMode::List => {
-            let visible_rows = dialog.entries.len().clamp(3, 8) as u16;
-            // border(2) + entries + error(1) + hint(1)
-            let height = visible_rows + 4;
-            let popup = centred_rect(52, height, area);
-            f.render_widget(Clear, popup);
+    // border(2) + spacer(1) + host field(3) + guest field(3) + hint(1) = 10
+    let popup = centred_rect(52, 10, area);
+    f.render_widget(Clear, popup);
 
-            let block = Block::default()
-                .title(Span::styled(" Manage Ports ", theme.accent_bold()))
-                .borders(Borders::ALL)
-                .border_type(theme.border_unfocused_type)
-                .border_style(theme.accent())
-                .padding(Padding::horizontal(1));
+    let block = Block::default()
+        .title(Span::styled(" Add Port Mapping ", theme.accent_bold()))
+        .borders(Borders::ALL)
+        .border_type(theme.border_unfocused_type)
+        .border_style(theme.accent())
+        .padding(Padding::horizontal(1));
 
-            let inner = block.inner(popup);
-            f.render_widget(block, popup);
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
 
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Fill(1),
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                ])
-                .split(inner);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // top spacer
+            Constraint::Length(3), // host port
+            Constraint::Length(3), // guest port
+            Constraint::Length(1), // hint/error
+        ])
+        .split(inner);
 
-            if dialog.entries.is_empty() {
-                f.render_widget(
-                    Paragraph::new(Span::styled("(no ports configured)", theme.muted())),
-                    chunks[0],
-                );
-            } else {
-                for (i, (host, guest)) in dialog.entries.iter().enumerate() {
-                    if i as u16 >= chunks[0].height {
-                        break;
-                    }
-                    let is_sel = i == dialog.selected;
-                    let style = if is_sel {
-                        theme.selected()
-                    } else {
-                        theme.text()
-                    };
-                    let row = Rect::new(chunks[0].x, chunks[0].y + i as u16, chunks[0].width, 1);
-                    f.render_widget(
-                        Paragraph::new(Span::styled(format!("{host}:{guest}"), style)),
-                        row,
-                    );
-                }
-            }
+    render_field(
+        f,
+        theme,
+        "Host Port ",
+        &dialog.host_input,
+        dialog.add_field == 0,
+        chunks[1],
+    );
+    render_field(
+        f,
+        theme,
+        "Guest Port",
+        &dialog.guest_input,
+        dialog.add_field == 1,
+        chunks[2],
+    );
 
-            if let Some(ref err) = dialog.error {
-                f.render_widget(
-                    Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
-                    chunks[1],
-                );
-            }
-
-            f.render_widget(
-                Paragraph::new(theme.hint_line(&[
-                    ("↑↓", "select"),
-                    ("a", "add"),
-                    ("d", "delete"),
-                    ("Esc", "close"),
-                ])),
-                chunks[2],
-            );
-        }
-        SubDialogMode::Add => {
-            // border(2) + spacer(1) + host field(3) + guest field(3) + spacer(1) + hint(1) = 11
-            let popup = centred_rect(52, 11, area);
-            f.render_widget(Clear, popup);
-
-            let block = Block::default()
-                .title(Span::styled(" Add Port Mapping ", theme.accent_bold()))
-                .borders(Borders::ALL)
-                .border_type(theme.border_unfocused_type)
-                .border_style(theme.accent())
-                .padding(Padding::horizontal(1));
-
-            let inner = block.inner(popup);
-            f.render_widget(block, popup);
-
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(1), // top spacer
-                    Constraint::Length(3), // host port
-                    Constraint::Length(3), // guest port
-                    Constraint::Length(1), // hint/error
-                ])
-                .split(inner);
-
-            render_field(
-                f,
-                theme,
-                "Host Port ",
-                &dialog.host_input,
-                dialog.add_field == 0,
-                chunks[1],
-            );
-            render_field(
-                f,
-                theme,
-                "Guest Port",
-                &dialog.guest_input,
-                dialog.add_field == 1,
-                chunks[2],
-            );
-
-            if let Some(ref err) = dialog.error {
-                f.render_widget(
-                    Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
-                    chunks[3],
-                );
-            } else {
-                f.render_widget(
-                    Paragraph::new(theme.hint_line(&[
-                        ("Tab", "field"),
-                        ("Enter", "add"),
-                        ("Esc", "cancel"),
-                    ])),
-                    chunks[3],
-                );
-            }
-        }
+    if let Some(ref err) = dialog.error {
+        f.render_widget(
+            Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
+            chunks[3],
+        );
+    } else {
+        f.render_widget(
+            Paragraph::new(theme.hint_line(&[
+                ("Tab", "field"),
+                ("Enter", "add"),
+                ("Esc", "cancel"),
+            ])),
+            chunks[3],
+        );
     }
 }
 
-/// Render the env vars management sub-dialog.
-fn render_env_vars_dialog(f: &mut Frame, app: &App, area: Rect) {
-    let dialog = &app.create_dialog.env_vars_dialog;
+/// Render the "Add Environment Variable" popup.
+fn render_env_var_add_dialog(f: &mut Frame, app: &App, area: Rect) {
+    let dialog = &app.create_dialog.env_var_add;
     let theme = &app.theme;
     if !dialog.visible {
         return;
     }
 
-    match dialog.mode {
-        SubDialogMode::List => {
-            let visible_rows = dialog.entries.len().clamp(3, 8) as u16;
-            let height = visible_rows + 4;
-            let popup = centred_rect(60, height, area);
-            f.render_widget(Clear, popup);
+    // border(2) + spacer(1) + key field(3) + value field(3) + hint(1) = 10
+    let popup = centred_rect(60, 10, area);
+    f.render_widget(Clear, popup);
 
-            let block = Block::default()
-                .title(Span::styled(
-                    " Manage Environment Variables ",
-                    theme.accent_bold(),
-                ))
-                .borders(Borders::ALL)
-                .border_type(theme.border_unfocused_type)
-                .border_style(theme.accent())
-                .padding(Padding::horizontal(1));
+    let block = Block::default()
+        .title(Span::styled(
+            " Add Environment Variable ",
+            theme.accent_bold(),
+        ))
+        .borders(Borders::ALL)
+        .border_type(theme.border_unfocused_type)
+        .border_style(theme.accent())
+        .padding(Padding::horizontal(1));
 
-            let inner = block.inner(popup);
-            f.render_widget(block, popup);
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
 
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Fill(1),
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                ])
-                .split(inner);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // top spacer
+            Constraint::Length(3), // key
+            Constraint::Length(3), // value
+            Constraint::Length(1), // hint/error
+        ])
+        .split(inner);
 
-            if dialog.entries.is_empty() {
-                f.render_widget(
-                    Paragraph::new(Span::styled(
-                        "(no environment variables configured)",
-                        theme.muted(),
-                    )),
-                    chunks[0],
-                );
-            } else {
-                for (i, (key, val)) in dialog.entries.iter().enumerate() {
-                    if i as u16 >= chunks[0].height {
-                        break;
-                    }
-                    let is_sel = i == dialog.selected;
-                    let style = if is_sel {
-                        theme.selected()
-                    } else {
-                        theme.text()
-                    };
-                    // Truncate long lines to fit the popup width.
-                    let max_w = chunks[0].width.saturating_sub(4) as usize;
-                    let entry = format!("{key}={val}");
-                    let display = if entry.len() > max_w {
-                        format!("{}…", &entry[..max_w.saturating_sub(1)])
-                    } else {
-                        entry
-                    };
-                    let row = Rect::new(chunks[0].x, chunks[0].y + i as u16, chunks[0].width, 1);
-                    f.render_widget(Paragraph::new(Span::styled(display, style)), row);
-                }
-            }
+    render_field(
+        f,
+        theme,
+        "Key  ",
+        &dialog.key_input,
+        dialog.add_field == 0,
+        chunks[1],
+    );
+    render_field(
+        f,
+        theme,
+        "Value",
+        &dialog.value_input,
+        dialog.add_field == 1,
+        chunks[2],
+    );
 
-            if let Some(ref err) = dialog.error {
-                f.render_widget(
-                    Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
-                    chunks[1],
-                );
-            }
-
-            f.render_widget(
-                Paragraph::new(theme.hint_line(&[
-                    ("↑↓", "select"),
-                    ("a", "add"),
-                    ("d", "delete"),
-                    ("Esc", "close"),
-                ])),
-                chunks[2],
-            );
-        }
-        SubDialogMode::Add => {
-            // border(2) + spacer(1) + key field(3) + value field(3) + spacer(1) + hint(1) = 11
-            let popup = centred_rect(60, 11, area);
-            f.render_widget(Clear, popup);
-
-            let block = Block::default()
-                .title(Span::styled(
-                    " Add Environment Variable ",
-                    theme.accent_bold(),
-                ))
-                .borders(Borders::ALL)
-                .border_type(theme.border_unfocused_type)
-                .border_style(theme.accent())
-                .padding(Padding::horizontal(1));
-
-            let inner = block.inner(popup);
-            f.render_widget(block, popup);
-
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(1), // top spacer
-                    Constraint::Length(3), // key
-                    Constraint::Length(3), // value
-                    Constraint::Length(1), // hint/error
-                ])
-                .split(inner);
-
-            render_field(
-                f,
-                theme,
-                "Key  ",
-                &dialog.key_input,
-                dialog.add_field == 0,
-                chunks[1],
-            );
-            render_field(
-                f,
-                theme,
-                "Value",
-                &dialog.value_input,
-                dialog.add_field == 1,
-                chunks[2],
-            );
-
-            if let Some(ref err) = dialog.error {
-                f.render_widget(
-                    Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
-                    chunks[3],
-                );
-            } else {
-                f.render_widget(
-                    Paragraph::new(theme.hint_line(&[
-                        ("Tab", "field"),
-                        ("Enter", "add"),
-                        ("Esc", "cancel"),
-                    ])),
-                    chunks[3],
-                );
-            }
-        }
+    if let Some(ref err) = dialog.error {
+        f.render_widget(
+            Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
+            chunks[3],
+        );
+    } else {
+        f.render_widget(
+            Paragraph::new(theme.hint_line(&[
+                ("Tab", "field"),
+                ("Enter", "add"),
+                ("Esc", "cancel"),
+            ])),
+            chunks[3],
+        );
     }
 }
 
@@ -829,303 +784,331 @@ fn render_dir_picker(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(theme.hint_line(hint_pairs)), chunks[3]);
 }
 
-/// Render the network policy rules management sub-dialog.
-///
-/// Network policy is applied only when the sandbox is created (the SDK has
-/// no API for changing it on an existing sandbox), so this dialog is only
-/// reachable from the create-sandbox dialog's Advanced tab.
-fn render_network_rules_dialog(f: &mut Frame, app: &App, area: Rect) {
-    let dialog = &app.create_dialog.network_rules_dialog;
+/// Render the "Add Network Rule" popup, exposing the full expressiveness of
+/// the SDK's `RuleBuilder`: direction, action, destination kind/value/
+/// group, protocol filter, and an optional guest-side port or port range.
+fn render_net_rule_add_dialog(f: &mut Frame, app: &App, area: Rect) {
+    let dialog = &app.create_dialog.net_rule_add;
     let theme = &app.theme;
     if !dialog.visible {
         return;
     }
 
-    match dialog.mode {
-        SubDialogMode::List => {
-            let visible_rows = dialog.entries.len().clamp(3, 8) as u16;
-            let height = visible_rows + 4;
-            let popup = centred_rect(65, height, area);
-            f.render_widget(Clear, popup);
+    // border(2) + direction/action(1) + dest kind(1) + dest value(3) +
+    // protocols(1) + ports(3) + hint(1) = 12
+    let popup = centred_rect(70, 12, area);
+    f.render_widget(Clear, popup);
 
-            let block = Block::default()
-                .title(Span::styled(" Manage Network Rules ", theme.accent_bold()))
-                .borders(Borders::ALL)
-                .border_type(theme.border_unfocused_type)
-                .border_style(theme.accent())
-                .padding(Padding::horizontal(1));
+    let block = Block::default()
+        .title(Span::styled(" Add Network Rule ", theme.accent_bold()))
+        .borders(Borders::ALL)
+        .border_type(theme.border_unfocused_type)
+        .border_style(theme.accent())
+        .padding(Padding::horizontal(1));
 
-            let inner = block.inner(popup);
-            f.render_widget(block, popup);
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
 
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Fill(1),
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                ])
-                .split(inner);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // direction / action
+            Constraint::Length(1), // dest kind
+            Constraint::Length(3), // dest value / group
+            Constraint::Length(1), // protocols
+            Constraint::Length(3), // ports
+            Constraint::Length(1), // hint/error
+        ])
+        .split(inner);
 
-            if dialog.entries.is_empty() {
-                f.render_widget(
-                    Paragraph::new(Span::styled(
-                        "(no rules — default allow-all policy)",
-                        theme.muted(),
-                    )),
-                    chunks[0],
-                );
+    let style_for = |focused: bool| if focused { theme.accent_bold() } else { theme.text() };
+
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Direction: ", theme.muted()),
+            Span::styled(dialog.direction.label(), style_for(dialog.add_field == 0)),
+            Span::raw("    "),
+            Span::styled("Action: ", theme.muted()),
+            Span::styled(dialog.action.label(), style_for(dialog.add_field == 1)),
+        ])),
+        chunks[0],
+    );
+
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Destination Kind: ", theme.muted()),
+            Span::styled(dialog.dest_kind.label(), style_for(dialog.add_field == 2)),
+        ])),
+        chunks[1],
+    );
+
+    if dialog.dest_kind == NetRuleDestKind::Group {
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("Group: ", theme.muted()),
+                Span::styled(dialog.dest_group.label(), style_for(dialog.add_field == 3)),
+            ])),
+            chunks[2],
+        );
+    } else if dialog.dest_kind == NetRuleDestKind::Any {
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                "(matches any destination)",
+                theme.muted(),
+            )),
+            chunks[2],
+        );
+    } else {
+        render_field(
+            f,
+            theme,
+            "Value",
+            &dialog.dest_input,
+            dialog.add_field == 3,
+            chunks[2],
+        );
+    }
+
+    let proto_spans: Vec<Span> = crate::sandbox::NetRuleProtocol::ALL
+        .iter()
+        .enumerate()
+        .flat_map(|(i, proto)| {
+            let checked = dialog.protocols.contains(proto);
+            let cursor_here = dialog.add_field == 4 && dialog.protocol_cursor == i;
+            let box_style = if cursor_here {
+                theme.accent_bold()
+            } else if checked {
+                theme.text()
             } else {
-                for (i, rule) in dialog.entries.iter().enumerate() {
-                    if i as u16 >= chunks[0].height {
-                        break;
-                    }
-                    let is_sel = i == dialog.selected;
-                    let style = if is_sel {
-                        theme.selected()
-                    } else {
-                        theme.text()
-                    };
-                    let entry = format!(
-                        "{} {} {}",
-                        rule.direction.label(),
-                        rule.action.label(),
-                        rule.cidr
-                    );
-                    let row = Rect::new(chunks[0].x, chunks[0].y + i as u16, chunks[0].width, 1);
-                    f.render_widget(Paragraph::new(Span::styled(entry, style)), row);
-                }
-            }
+                theme.muted()
+            };
+            let mark = if checked { "[x]" } else { "[ ]" };
+            vec![
+                Span::styled(format!("{mark} {} ", proto.label()), box_style),
+                Span::raw(" "),
+            ]
+        })
+        .collect();
+    f.render_widget(Paragraph::new(Line::from(proto_spans)), chunks[3]);
 
-            if let Some(ref err) = dialog.error {
-                f.render_widget(
-                    Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
-                    chunks[1],
-                );
-            }
+    render_field(
+        f,
+        theme,
+        "Ports",
+        &dialog.ports_input,
+        dialog.add_field == 5,
+        chunks[4],
+    );
 
-            f.render_widget(
-                Paragraph::new(theme.hint_line(&[
-                    ("↑↓", "select"),
-                    ("a", "add"),
-                    ("d", "delete"),
-                    ("Esc", "close"),
-                ])),
-                chunks[2],
-            );
-        }
-        SubDialogMode::Add => {
-            // border(2) + spacer(1) + cidr field(3) + action/direction line(1) + hint(1) = 8
-            let popup = centred_rect(65, 8, area);
-            f.render_widget(Clear, popup);
-
-            let block = Block::default()
-                .title(Span::styled(" Add Network Rule ", theme.accent_bold()))
-                .borders(Borders::ALL)
-                .border_type(theme.border_unfocused_type)
-                .border_style(theme.accent())
-                .padding(Padding::horizontal(1));
-
-            let inner = block.inner(popup);
-            f.render_widget(block, popup);
-
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3), // cidr
-                    Constraint::Length(1), // action/direction summary
-                    Constraint::Length(1), // hint/error
-                ])
-                .split(inner);
-
-            render_field(f, theme, "CIDR ", &dialog.cidr_input, true, chunks[0]);
-
-            let summary = format!(
-                "Direction: {} (e/i)   Action: {} (space)",
-                dialog.direction.label(),
-                dialog.action.label()
-            );
-            f.render_widget(
-                Paragraph::new(Span::styled(summary, theme.accent())),
-                chunks[1],
-            );
-
-            if let Some(ref err) = dialog.error {
-                f.render_widget(
-                    Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
-                    chunks[2],
-                );
-            } else {
-                f.render_widget(
-                    Paragraph::new(Span::styled(
-                        "Type CIDR   Enter add   Esc cancel",
-                        theme.muted(),
-                    )),
-                    chunks[2],
-                );
-            }
-        }
+    if let Some(ref err) = dialog.error {
+        f.render_widget(
+            Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
+            chunks[5],
+        );
+    } else {
+        f.render_widget(
+            Paragraph::new(theme.hint_line(&[
+                ("Tab", "field"),
+                ("◄►/Space", "cycle/toggle"),
+                ("Enter", "next/add"),
+                ("Esc", "cancel"),
+            ])),
+            chunks[5],
+        );
     }
 }
 
-/// Render the volume mounts management sub-dialog.
-///
-/// Mounts are applied only when the sandbox is created (the SDK has no API
-/// for changing mounts on an existing sandbox), so this dialog is only
-/// reachable from the create-sandbox dialog's Basic tab.
-fn render_mounts_dialog(f: &mut Frame, app: &App, area: Rect) {
-    use crate::sandbox::MountSource;
-
-    let dialog = &app.create_dialog.mounts_dialog;
+/// Render the "Add Volume Mount" popup.
+fn render_mount_add_dialog(f: &mut Frame, app: &App, area: Rect) {
+    let dialog = &app.create_dialog.mount_add;
     let theme = &app.theme;
     if !dialog.visible {
         return;
     }
 
-    match dialog.mode {
-        SubDialogMode::List => {
-            let visible_rows = dialog.entries.len().clamp(3, 8) as u16;
-            let height = visible_rows + 4;
-            let popup = centred_rect(65, height, area);
-            f.render_widget(Clear, popup);
+    // border(2) + guest field(3) + source field(3) + kind line(1) + hint(1) = 10
+    let popup = centred_rect(65, 10, area);
+    f.render_widget(Clear, popup);
 
-            let block = Block::default()
-                .title(Span::styled(" Manage Volume Mounts ", theme.accent_bold()))
-                .borders(Borders::ALL)
-                .border_type(theme.border_unfocused_type)
-                .border_style(theme.accent())
-                .padding(Padding::horizontal(1));
+    let block = Block::default()
+        .title(Span::styled(" Add Volume Mount ", theme.accent_bold()))
+        .borders(Borders::ALL)
+        .border_type(theme.border_unfocused_type)
+        .border_style(theme.accent())
+        .padding(Padding::horizontal(1));
 
-            let inner = block.inner(popup);
-            f.render_widget(block, popup);
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
 
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Fill(1),
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                ])
-                .split(inner);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // guest path
+            Constraint::Length(3), // host path / volume name
+            Constraint::Length(1), // kind summary
+            Constraint::Length(1), // hint/error
+        ])
+        .split(inner);
 
-            if dialog.entries.is_empty() {
-                f.render_widget(
-                    Paragraph::new(Span::styled("(no mounts configured)", theme.muted())),
-                    chunks[0],
-                );
-            } else {
-                for (i, mount) in dialog.entries.iter().enumerate() {
-                    if i as u16 >= chunks[0].height {
-                        break;
-                    }
-                    let is_sel = i == dialog.selected;
-                    let style = if is_sel {
-                        theme.selected()
-                    } else {
-                        theme.text()
-                    };
-                    let entry = match &mount.source {
-                        MountSource::Bind(host) => {
-                            format!("{} <- bind {host}", mount.guest_path)
-                        }
-                        MountSource::Named(name) => {
-                            format!("{} <- volume {name}", mount.guest_path)
-                        }
-                    };
-                    let row = Rect::new(chunks[0].x, chunks[0].y + i as u16, chunks[0].width, 1);
-                    f.render_widget(Paragraph::new(Span::styled(entry, style)), row);
-                }
-            }
+    render_field(
+        f,
+        theme,
+        "Guest",
+        &dialog.guest_input,
+        dialog.add_field == 0,
+        chunks[0],
+    );
+    let source_label = match dialog.kind {
+        MountKindChoice::Bind => "Host ",
+        MountKindChoice::Named => "Vol  ",
+    };
+    render_field(
+        f,
+        theme,
+        source_label,
+        &dialog.source_input,
+        dialog.add_field == 1,
+        chunks[1],
+    );
 
-            if let Some(ref err) = dialog.error {
-                f.render_widget(
-                    Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
-                    chunks[1],
-                );
-            }
+    let kind_label = match dialog.kind {
+        MountKindChoice::Bind => "Bind mount (b)",
+        MountKindChoice::Named => "Named volume (n)",
+    };
+    f.render_widget(
+        Paragraph::new(Span::styled(format!("Kind: {kind_label}"), theme.accent())),
+        chunks[2],
+    );
 
-            f.render_widget(
-                Paragraph::new(theme.hint_line(&[
-                    ("↑↓", "select"),
-                    ("a", "add"),
-                    ("d", "delete"),
-                    ("Esc", "close"),
-                ])),
-                chunks[2],
-            );
-        }
-        SubDialogMode::Add => {
-            // border(2) + guest field(3) + source field(3) + kind line(1) + hint(1) = 10
-            let popup = centred_rect(65, 10, area);
-            f.render_widget(Clear, popup);
+    if let Some(ref err) = dialog.error {
+        f.render_widget(
+            Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
+            chunks[3],
+        );
+    } else {
+        f.render_widget(
+            Paragraph::new(theme.hint_line(&[
+                ("Tab", "field"),
+                ("b/n", "kind"),
+                ("Enter", "add"),
+                ("Esc", "cancel"),
+            ])),
+            chunks[3],
+        );
+    }
+}
 
-            let block = Block::default()
-                .title(Span::styled(" Add Volume Mount ", theme.accent_bold()))
-                .borders(Borders::ALL)
-                .border_type(theme.border_unfocused_type)
-                .border_style(theme.accent())
-                .padding(Padding::horizontal(1));
+/// Render the "Add Secret" popup, mirroring the SDK's `SecretBuilder`.
+fn render_secret_add_dialog(f: &mut Frame, app: &App, area: Rect) {
+    let dialog = &app.create_dialog.secret_add;
+    let theme = &app.theme;
+    if !dialog.visible {
+        return;
+    }
 
-            let inner = block.inner(popup);
-            f.render_widget(block, popup);
+    // border(2) + env(3) + value(3) + hosts(3) + toggles(2) + hint(1) = 14
+    let popup = centred_rect(65, 14, area);
+    f.render_widget(Clear, popup);
 
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3), // guest path
-                    Constraint::Length(3), // host path / volume name
-                    Constraint::Length(1), // kind summary
-                    Constraint::Length(1), // hint/error
-                ])
-                .split(inner);
+    let block = Block::default()
+        .title(Span::styled(" Add Secret ", theme.accent_bold()))
+        .borders(Borders::ALL)
+        .border_type(theme.border_unfocused_type)
+        .border_style(theme.accent())
+        .padding(Padding::horizontal(1));
 
-            render_field(
-                f,
-                theme,
-                "Guest",
-                &dialog.guest_input,
-                dialog.add_field == 0,
-                chunks[0],
-            );
-            let source_label = match dialog.kind {
-                crate::app::MountKindChoice::Bind => "Host ",
-                crate::app::MountKindChoice::Named => "Vol  ",
-            };
-            render_field(
-                f,
-                theme,
-                source_label,
-                &dialog.source_input,
-                dialog.add_field == 1,
-                chunks[1],
-            );
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
 
-            let kind_label = match dialog.kind {
-                crate::app::MountKindChoice::Bind => "Bind mount (b)",
-                crate::app::MountKindChoice::Named => "Named volume (n)",
-            };
-            f.render_widget(
-                Paragraph::new(Span::styled(format!("Kind: {kind_label}"), theme.accent())),
-                chunks[2],
-            );
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // env
+            Constraint::Length(3), // value
+            Constraint::Length(3), // hosts
+            Constraint::Length(1), // toggle row 1: headers / basic auth
+            Constraint::Length(1), // toggle row 2: query / body / tls identity
+            Constraint::Length(1), // hint/error
+        ])
+        .split(inner);
 
-            if let Some(ref err) = dialog.error {
-                f.render_widget(
-                    Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
-                    chunks[3],
-                );
-            } else {
-                f.render_widget(
-                    Paragraph::new(theme.hint_line(&[
-                        ("Tab", "field"),
-                        ("b/n", "kind"),
-                        ("Enter", "add"),
-                        ("Esc", "cancel"),
-                    ])),
-                    chunks[3],
-                );
-            }
-        }
+    render_field(
+        f,
+        theme,
+        "Env Var",
+        &dialog.env_input,
+        dialog.add_field == 0,
+        chunks[0],
+    );
+    let masked_value: String = "*".repeat(dialog.value_input.chars().count());
+    render_field(
+        f,
+        theme,
+        "Value  ",
+        &masked_value,
+        dialog.add_field == 1,
+        chunks[1],
+    );
+    render_field(
+        f,
+        theme,
+        "Hosts  ",
+        &dialog.hosts_input,
+        dialog.add_field == 2,
+        chunks[2],
+    );
+
+    let toggle_span = |on: bool, label: &str, focused: bool| {
+        let style = if focused {
+            theme.accent_bold()
+        } else if on {
+            theme.text()
+        } else {
+            theme.muted()
+        };
+        let mark = if on { "[x]" } else { "[ ]" };
+        Span::styled(format!("{mark} {label}  "), style)
+    };
+
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            toggle_span(dialog.inject_headers, "Headers", dialog.add_field == 3),
+            toggle_span(
+                dialog.inject_basic_auth,
+                "Basic Auth",
+                dialog.add_field == 4,
+            ),
+        ])),
+        chunks[3],
+    );
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            toggle_span(dialog.inject_query, "Query", dialog.add_field == 5),
+            toggle_span(dialog.inject_body, "Body", dialog.add_field == 6),
+            toggle_span(
+                dialog.require_tls_identity,
+                "Require TLS Identity",
+                dialog.add_field == 7,
+            ),
+        ])),
+        chunks[4],
+    );
+
+    if let Some(ref err) = dialog.error {
+        f.render_widget(
+            Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
+            chunks[5],
+        );
+    } else {
+        f.render_widget(
+            Paragraph::new(theme.hint_line(&[
+                ("Tab", "field"),
+                ("Space", "toggle"),
+                ("Enter", "next/add"),
+                ("Esc", "cancel"),
+            ])),
+            chunks[5],
+        );
     }
 }
 

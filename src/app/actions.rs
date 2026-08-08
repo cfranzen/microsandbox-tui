@@ -173,6 +173,7 @@ pub(crate) fn submit_create_dialog(app: &mut App) {
 
     let disable_network = dlg.disable_network;
     let network_rules = dlg.network_rules.clone();
+    let secrets = dlg.secrets.clone();
     let mounts = merge_workdir_mount(dlg.mounts.clone(), workdir_mount);
 
     app.create_dialog = Default::default();
@@ -194,6 +195,7 @@ pub(crate) fn submit_create_dialog(app: &mut App) {
             max_memory_mib: max_memory,
             disable_network,
             network_rules,
+            secrets,
             mounts,
         };
         let result = crate::sandbox::create_sandbox(&cfg).await;

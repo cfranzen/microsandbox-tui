@@ -6,33 +6,45 @@
 //! owns the plain-data state and small helper methods each dialog needs.
 
 use crate::config::AppConfig;
-use crate::sandbox::{NetRuleAction, NetRuleDirection, NetworkRule, VolumeInfo, VolumeMountConfig};
+use crate::sandbox::{
+    NetRuleAction, NetRuleDestGroup, NetRuleDestKind, NetRuleDirection, NetRuleProtocol,
+    NetworkRule, SecretConfig, VolumeInfo, VolumeMountConfig,
+};
 
-/// State of the "create new sandbox" modal dialog.
+/// Which tab of the "create new sandbox" dialog is active.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DialogTab {
     #[default]
     Basic,
-    Advanced,
+    GuestOs,
+    Network,
+    Secrets,
 }
 
 impl DialogTab {
+    const ALL: [DialogTab; 4] = [
+        DialogTab::Basic,
+        DialogTab::GuestOs,
+        DialogTab::Network,
+        DialogTab::Secrets,
+    ];
+
     pub fn next(self) -> Self {
-        match self {
-            DialogTab::Basic => DialogTab::Advanced,
-            DialogTab::Advanced => DialogTab::Basic,
-        }
+        let idx = Self::ALL.iter().position(|t| *t == self).unwrap_or(0);
+        Self::ALL[(idx + 1) % Self::ALL.len()]
     }
 
     pub fn prev(self) -> Self {
-        // With only two tabs, prev == next
-        self.next()
+        let idx = Self::ALL.iter().position(|t| *t == self).unwrap_or(0);
+        Self::ALL[(idx + Self::ALL.len() - 1) % Self::ALL.len()]
     }
 
     pub fn title(self) -> &'static str {
         match self {
             DialogTab::Basic => "Basic",
-            DialogTab::Advanced => "Advanced",
+            DialogTab::GuestOs => "Guest OS",
+            DialogTab::Network => "Network",
+            DialogTab::Secrets => "Secrets",
         }
     }
 }
@@ -142,7 +154,7 @@ pub fn load_dir_entries(path: &str) -> Vec<String> {
     entries
 }
 
-/// Mode for the ports / env-vars sub-dialogs.
+/// Mode for the Volumes view's list/add sub-states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SubDialogMode {
     #[default]
@@ -150,95 +162,105 @@ pub enum SubDialogMode {
     Add,
 }
 
-/// Sub-dialog for managing port mappings (host:guest).
+/// Popup dialog for adding one port mapping (host:guest). Entries already
+/// added are listed inline in the Network tab; this popup only handles
+/// adding a new one.
 #[derive(Debug, Clone, Default)]
-pub struct PortsDialog {
+pub struct PortAddDialog {
     pub visible: bool,
-    /// Confirmed mappings (host_port, guest_port).
-    pub entries: Vec<(u16, u16)>,
-    /// Selected entry index (List mode).
-    pub selected: usize,
-    pub mode: SubDialogMode,
-    /// Host-port input buffer (Add mode).
+    /// Host-port input buffer.
     pub host_input: String,
-    /// Guest-port input buffer (Add mode).
+    /// Guest-port input buffer.
     pub guest_input: String,
-    /// Focused input index in Add mode: 0 = host, 1 = guest.
+    /// Focused input index: 0 = host, 1 = guest.
     pub add_field: usize,
     pub error: Option<String>,
 }
 
-impl PortsDialog {
-    pub fn open(entries: Vec<(u16, u16)>) -> Self {
-        let selected = entries.len().saturating_sub(1);
+impl PortAddDialog {
+    pub fn open() -> Self {
         Self {
             visible: true,
-            entries,
-            selected,
             ..Default::default()
         }
     }
 }
 
-/// Sub-dialog for managing environment variables (KEY=VALUE).
+/// Popup dialog for adding one environment variable (KEY=VALUE). Entries
+/// already added are listed inline in the Guest OS tab; this popup only
+/// handles adding a new one.
 #[derive(Debug, Clone, Default)]
-pub struct EnvVarsDialog {
+pub struct EnvVarAddDialog {
     pub visible: bool,
-    /// Confirmed variables (key, value).
-    pub entries: Vec<(String, String)>,
-    /// Selected entry index (List mode).
-    pub selected: usize,
-    pub mode: SubDialogMode,
-    /// Key input buffer (Add mode).
+    /// Key input buffer.
     pub key_input: String,
-    /// Value input buffer (Add mode).
+    /// Value input buffer.
     pub value_input: String,
-    /// Focused input index in Add mode: 0 = key, 1 = value.
+    /// Focused input index: 0 = key, 1 = value.
     pub add_field: usize,
     pub error: Option<String>,
 }
 
-impl EnvVarsDialog {
-    pub fn open(entries: Vec<(String, String)>) -> Self {
-        let selected = entries.len().saturating_sub(1);
+impl EnvVarAddDialog {
+    pub fn open() -> Self {
         Self {
             visible: true,
-            entries,
-            selected,
             ..Default::default()
         }
     }
 }
 
-/// Sub-dialog for managing CIDR-based network policy rules.
-///
-/// Network policy can only be configured at sandbox-creation time (the SDK's
-/// `SandboxModificationBuilder` has no field for it), so this dialog is only
-/// reachable from the create-sandbox dialog's Advanced tab.
-#[derive(Debug, Clone, Default)]
-pub struct NetworkRulesDialog {
+/// Popup dialog for adding one network policy rule. Entries already added
+/// are listed inline in the Network tab; this popup only handles adding a
+/// new one, and exposes the full expressiveness of the SDK's
+/// `RuleBuilder`: direction, action, destination kind/value/group, protocol
+/// filter, and an optional guest-side port or port range.
+#[derive(Debug, Clone)]
+pub struct NetRuleAddDialog {
     pub visible: bool,
-    /// Confirmed rules.
-    pub entries: Vec<NetworkRule>,
-    /// Selected entry index (List mode).
-    pub selected: usize,
-    pub mode: SubDialogMode,
-    /// CIDR input buffer (Add mode).
-    pub cidr_input: String,
-    /// Action for the rule being added.
-    pub action: NetRuleAction,
-    /// Direction for the rule being added.
     pub direction: NetRuleDirection,
+    pub action: NetRuleAction,
+    pub dest_kind: NetRuleDestKind,
+    /// Free-text destination value (IP / CIDR / Domain / Domain Suffix).
+    pub dest_input: String,
+    pub dest_group: NetRuleDestGroup,
+    /// Which protocols are currently toggled on.
+    pub protocols: Vec<NetRuleProtocol>,
+    /// Index into [`NetRuleProtocol::ALL`] currently highlighted for toggling.
+    pub protocol_cursor: usize,
+    /// Port or port-range input buffer, e.g. `"8080"` or `"1000-2000"`.
+    pub ports_input: String,
+    /// Focused field: 0 direction, 1 action, 2 dest kind, 3 dest value/group,
+    /// 4 protocols, 5 ports.
+    pub add_field: usize,
     pub error: Option<String>,
 }
 
-impl NetworkRulesDialog {
-    pub fn open(entries: Vec<NetworkRule>) -> Self {
-        let selected = entries.len().saturating_sub(1);
+impl Default for NetRuleAddDialog {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            direction: NetRuleDirection::default(),
+            action: NetRuleAction::default(),
+            dest_kind: NetRuleDestKind::default(),
+            dest_input: String::new(),
+            dest_group: NetRuleDestGroup::default(),
+            protocols: Vec::new(),
+            protocol_cursor: 0,
+            ports_input: String::new(),
+            add_field: 0,
+            error: None,
+        }
+    }
+}
+
+impl NetRuleAddDialog {
+    /// Total number of navigable fields in the Add popup.
+    pub const FIELD_COUNT: usize = 6;
+
+    pub fn open() -> Self {
         Self {
             visible: true,
-            entries,
-            selected,
             ..Default::default()
         }
     }
@@ -252,40 +274,98 @@ pub enum MountKindChoice {
     Named,
 }
 
-/// Sub-dialog for managing volume mounts on the create-sandbox dialog.
-///
-/// Mounts can only be configured at sandbox-creation time (the SDK's
-/// `SandboxModificationBuilder` has no field for it), so this dialog is only
-/// reachable from the create-sandbox dialog's Basic tab.
+/// Popup dialog for adding one volume mount. Entries already added are
+/// listed inline in the Guest OS tab; this popup only handles adding a new
+/// one.
 #[derive(Debug, Clone, Default)]
-pub struct MountsDialog {
+pub struct MountAddDialog {
     pub visible: bool,
-    /// Confirmed mounts.
-    pub entries: Vec<VolumeMountConfig>,
-    /// Selected entry index (List mode).
-    pub selected: usize,
-    pub mode: SubDialogMode,
-    /// Guest path input buffer (Add mode).
+    /// Guest path input buffer.
     pub guest_input: String,
-    /// Host path (Bind) or volume name (Named) input buffer (Add mode).
+    /// Host path (Bind) or volume name (Named) input buffer.
     pub source_input: String,
-    /// Which mount source kind is being configured (Add mode).
+    /// Which mount source kind is being configured.
     pub kind: MountKindChoice,
-    /// Focused input index in Add mode: 0 = guest path, 1 = source.
+    /// Focused input index: 0 = guest path, 1 = source.
     pub add_field: usize,
     pub error: Option<String>,
 }
 
-impl MountsDialog {
-    pub fn open(entries: Vec<VolumeMountConfig>) -> Self {
-        let selected = entries.len().saturating_sub(1);
+impl MountAddDialog {
+    pub fn open() -> Self {
         Self {
             visible: true,
-            entries,
-            selected,
             ..Default::default()
         }
     }
+}
+
+/// Popup dialog for adding one secret. Entries already added are listed
+/// inline in the Secrets tab; this popup only handles adding a new one.
+///
+/// Mirrors the SDK's `SecretBuilder`: an env var + value pair, one or more
+/// allowed hosts (comma-separated; `*.suffix` for a wildcard, a bare `*`
+/// for "any host, dangerous"), and the four injection scopes plus the
+/// TLS-identity requirement, each defaulted to match `SecretBuilder::new()`.
+#[derive(Debug, Clone)]
+pub struct SecretAddDialog {
+    pub visible: bool,
+    pub env_input: String,
+    /// Real secret value. Rendered masked (`******`) in the UI.
+    pub value_input: String,
+    /// Comma-separated allowed hosts.
+    pub hosts_input: String,
+    pub inject_headers: bool,
+    pub inject_basic_auth: bool,
+    pub inject_query: bool,
+    pub inject_body: bool,
+    pub require_tls_identity: bool,
+    /// Focused field: 0 env, 1 value, 2 hosts, 3 headers, 4 basic auth,
+    /// 5 query, 6 body, 7 require TLS identity.
+    pub add_field: usize,
+    pub error: Option<String>,
+}
+
+impl Default for SecretAddDialog {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            env_input: String::new(),
+            value_input: String::new(),
+            hosts_input: String::new(),
+            inject_headers: true,
+            inject_basic_auth: true,
+            inject_query: false,
+            inject_body: false,
+            require_tls_identity: true,
+            add_field: 0,
+            error: None,
+        }
+    }
+}
+
+impl SecretAddDialog {
+    /// Total number of navigable fields in the Add popup.
+    pub const FIELD_COUNT: usize = 8;
+
+    pub fn open() -> Self {
+        Self {
+            visible: true,
+            ..Default::default()
+        }
+    }
+}
+
+/// Identifies which inline list is currently focused within a
+/// [`CreateDialog`] tab, so key handling can route Up/Down/`a`/`d` to the
+/// right list instead of the outer field navigation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListField {
+    EnvVars,
+    Mounts,
+    Ports,
+    NetworkRules,
+    Secrets,
 }
 
 /// State of the "create new sandbox" modal dialog.
@@ -294,38 +374,57 @@ pub struct CreateDialog {
     pub visible: bool,
     pub tab: DialogTab,
     pub field: usize,
-    // Basic tab (fields 0-6)
+
+    // ── Basic tab (fields 0-6) ───────────────────────────────────────────
     pub name: String,
     pub image: String,
     pub cpus: String,
+    pub max_cpus: String,
     pub memory: String,
-    /// Port mappings (host, guest) managed via [`PortsDialog`].
-    pub ports: Vec<(u16, u16)>,
-    /// Environment variables (key, value) managed via [`EnvVarsDialog`].
-    pub env_vars: Vec<(String, String)>,
+    pub max_memory: String,
     pub workdir: String,
-    // Advanced tab (fields 0-5)
+
+    // ── Guest OS tab (fields 0-4) ────────────────────────────────────────
     pub hostname: String,
     pub user: String,
     pub shell: String,
-    pub max_cpus: String,
-    pub max_memory: String,
+    /// Environment variables (key, value), listed inline in the tab.
+    pub env_vars: Vec<(String, String)>,
+    pub env_vars_selected: usize,
+    /// Volume mounts, listed inline in the tab. Applied at creation time
+    /// only — existing sandboxes cannot have their mounts changed.
+    pub mounts: Vec<VolumeMountConfig>,
+    pub mounts_selected: usize,
+
+    // ── Network tab (fields 0-2) ─────────────────────────────────────────
     pub disable_network: bool,
+    /// Port mappings (host, guest), listed inline in the tab.
+    pub ports: Vec<(u16, u16)>,
+    pub ports_selected: usize,
+    /// Network policy rules, listed inline in the tab. Applied at creation
+    /// time only — the SDK has no API for changing policy afterwards.
+    pub network_rules: Vec<NetworkRule>,
+    pub network_rules_selected: usize,
+
+    // ── Secrets tab (field 0) ────────────────────────────────────────────
+    /// Secrets injected via the TLS proxy, listed inline in the tab.
+    pub secrets: Vec<SecretConfig>,
+    pub secrets_selected: usize,
+
     pub error: Option<String>,
+
     /// Inline directory browser for picking the workdir path.
     pub dir_picker: DirPicker,
-    /// Sub-dialog for managing port mappings.
-    pub ports_dialog: PortsDialog,
-    /// Sub-dialog for managing environment variables.
-    pub env_vars_dialog: EnvVarsDialog,
-    /// CIDR-based network policy rules, applied at creation time only.
-    pub network_rules: Vec<NetworkRule>,
-    /// Sub-dialog for managing network policy rules.
-    pub network_rules_dialog: NetworkRulesDialog,
-    /// Volume mounts, applied at creation time only.
-    pub mounts: Vec<VolumeMountConfig>,
-    /// Sub-dialog for managing volume mounts.
-    pub mounts_dialog: MountsDialog,
+    /// Popup for adding one port mapping.
+    pub port_add: PortAddDialog,
+    /// Popup for adding one environment variable.
+    pub env_var_add: EnvVarAddDialog,
+    /// Popup for adding one network policy rule.
+    pub net_rule_add: NetRuleAddDialog,
+    /// Popup for adding one volume mount.
+    pub mount_add: MountAddDialog,
+    /// Popup for adding one secret.
+    pub secret_add: SecretAddDialog,
 }
 
 impl CreateDialog {
@@ -369,10 +468,14 @@ impl CreateDialog {
         dlg
     }
 
+    /// Number of navigable form fields (excluding the Create button) on the
+    /// currently active tab.
     pub fn form_field_count(&self) -> usize {
         match self.tab {
-            DialogTab::Basic => 8, // name image cpus memory ports env_vars workdir mounts
-            DialogTab::Advanced => 7, // hostname user shell max_cpus max_memory no_net net_rules
+            DialogTab::Basic => 7, // name image cpus max_cpus memory max_memory workdir
+            DialogTab::GuestOs => 5, // hostname user shell env_vars mounts
+            DialogTab::Network => 3, // no_net ports net_rules
+            DialogTab::Secrets => 1, // secrets
         }
     }
 
@@ -406,29 +509,30 @@ impl CreateDialog {
     }
 
     /// Returns a mutable reference to the text value of the focused field,
-    /// or `None` when the focused field is a non-text widget (toggle or sub-dialog).
+    /// or `None` when the focused field is a non-text widget (toggle, list,
+    /// or sub-dialog).
     pub fn current_field_mut(&mut self) -> Option<&mut String> {
+        if self.is_create_focused() {
+            return None;
+        }
         match self.tab {
             DialogTab::Basic => match self.field {
                 0 => Some(&mut self.name),
                 1 => Some(&mut self.image),
                 2 => Some(&mut self.cpus),
-                3 => Some(&mut self.memory),
-                4 => None, // ports — managed via sub-dialog
-                5 => None, // env_vars — managed via sub-dialog
+                3 => Some(&mut self.max_cpus),
+                4 => Some(&mut self.memory),
+                5 => Some(&mut self.max_memory),
                 6 => None, // workdir — managed via dir picker
                 _ => None,
             },
-            DialogTab::Advanced => match self.field {
+            DialogTab::GuestOs => match self.field {
                 0 => Some(&mut self.hostname),
                 1 => Some(&mut self.user),
                 2 => Some(&mut self.shell),
-                3 => Some(&mut self.max_cpus),
-                4 => Some(&mut self.max_memory),
-                5 => None, // disable_network toggle
-                6 => None, // network rules — managed via sub-dialog
-                _ => None,
+                _ => None, // env_vars / mounts — inline lists
             },
+            DialogTab::Network | DialogTab::Secrets => None,
         }
     }
 
@@ -437,17 +541,31 @@ impl CreateDialog {
         if self.is_create_focused() {
             return false;
         }
-        match self.tab {
-            DialogTab::Basic => matches!(self.field, 2 | 3),
-            DialogTab::Advanced => matches!(self.field, 3 | 4),
-        }
+        self.tab == DialogTab::Basic && matches!(self.field, 2 | 3 | 4 | 5)
     }
 
     /// True when the focused field is a boolean toggle activated by Space.
     pub fn is_toggle_field(&self) -> bool {
-        !self.is_create_focused() && self.tab == DialogTab::Advanced && self.field == 5
+        !self.is_create_focused() && self.tab == DialogTab::Network && self.field == 0
+    }
+
+    /// Returns the inline list identified by the currently focused field,
+    /// if any, so key handling can route Up/Down/`a`/`d` to it.
+    pub fn focused_list(&self) -> Option<ListField> {
+        if self.is_create_focused() {
+            return None;
+        }
+        match (self.tab, self.field) {
+            (DialogTab::GuestOs, 3) => Some(ListField::EnvVars),
+            (DialogTab::GuestOs, 4) => Some(ListField::Mounts),
+            (DialogTab::Network, 1) => Some(ListField::Ports),
+            (DialogTab::Network, 2) => Some(ListField::NetworkRules),
+            (DialogTab::Secrets, 0) => Some(ListField::Secrets),
+            _ => None,
+        }
     }
 }
+
 
 /// State of the top-level "Volumes" management view.
 ///

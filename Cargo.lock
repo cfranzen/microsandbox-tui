@@ -2611,6 +2611,7 @@ dependencies = [
  "futures",
  "humantime",
  "microsandbox",
+ "microsandbox-network",
  "microsandbox-types",
  "ratatui",
  "serde",

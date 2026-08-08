@@ -12,7 +12,8 @@ use crossterm::event::{
 use ratatui::layout::Rect;
 
 use crate::sandbox::{
-    MountSource, NetRuleAction, NetRuleDirection, NetworkRule, VolumeMountConfig,
+    MountSource, NetRuleDestKind, NetRuleDirection, NetRuleProtocol, NetworkRule, SecretConfig,
+    SecretHostKind, SecretHostPattern, VolumeMountConfig,
 };
 
 use super::actions::{
@@ -21,8 +22,9 @@ use super::actions::{
     request_volume_refresh, scroll_down, scroll_up, submit_create_dialog, PendingAction,
 };
 use super::dialogs::{
-    CreateDialog, DialogTab, DirPicker, EnvVarsDialog, ExecDialog, MountKindChoice, MountsDialog,
-    NetworkRulesDialog, PortsDialog, SubDialogMode, VolumesView, DRIVES_ENTRY, PICKER_VISIBLE_ROWS,
+    CreateDialog, DialogTab, DirPicker, EnvVarAddDialog, ExecDialog, ListField, MountAddDialog,
+    MountKindChoice, NetRuleAddDialog, PortAddDialog, SecretAddDialog, SubDialogMode, VolumesView,
+    DRIVES_ENTRY, PICKER_VISIBLE_ROWS,
 };
 use super::{App, AppMessage, DetailTab, Focus};
 
@@ -63,14 +65,16 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
     if app.create_dialog.visible {
         if app.create_dialog.dir_picker.visible {
             handle_picker_key(app, key.code, key.modifiers);
-        } else if app.create_dialog.ports_dialog.visible {
-            handle_ports_dialog_key(app, key.code, key.modifiers);
-        } else if app.create_dialog.env_vars_dialog.visible {
-            handle_env_vars_dialog_key(app, key.code, key.modifiers);
-        } else if app.create_dialog.network_rules_dialog.visible {
-            handle_network_rules_dialog_key(app, key.code, key.modifiers);
-        } else if app.create_dialog.mounts_dialog.visible {
-            handle_mounts_dialog_key(app, key.code, key.modifiers);
+        } else if app.create_dialog.port_add.visible {
+            handle_port_add_key(app, key.code, key.modifiers);
+        } else if app.create_dialog.env_var_add.visible {
+            handle_env_var_add_key(app, key.code, key.modifiers);
+        } else if app.create_dialog.net_rule_add.visible {
+            handle_net_rule_add_key(app, key.code, key.modifiers);
+        } else if app.create_dialog.mount_add.visible {
+            handle_mount_add_key(app, key.code, key.modifiers);
+        } else if app.create_dialog.secret_add.visible {
+            handle_secret_add_key(app, key.code, key.modifiers);
         } else {
             handle_dialog_key(app, key.code, key.modifiers);
         }
@@ -279,6 +283,30 @@ fn card_at(app: &App, x: u16, y: u16) -> Option<Option<usize>> {
 }
 
 fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+    // A focused inline list intercepts Up/Down (move selection) and 'a'/'d'
+    // (add/delete) before the general field-navigation handling below.
+    if let Some(list) = app.create_dialog.focused_list() {
+        match code {
+            KeyCode::Up => {
+                move_list_selection(app, list, -1);
+                return;
+            }
+            KeyCode::Down => {
+                move_list_selection(app, list, 1);
+                return;
+            }
+            KeyCode::Char('a') | KeyCode::Char('A') => {
+                open_list_add_dialog(app, list);
+                return;
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Delete => {
+                delete_list_selected(app, list);
+                return;
+            }
+            _ => {}
+        }
+    }
+
     match code {
         KeyCode::Esc => {
             app.create_dialog = Default::default();
@@ -301,25 +329,14 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
             let dlg = &app.create_dialog;
             if dlg.is_create_focused() {
                 submit_create_dialog(app);
-            } else if dlg.tab == DialogTab::Basic && dlg.field == 4 {
-                let entries = app.create_dialog.ports.clone();
-                app.create_dialog.ports_dialog = PortsDialog::open(entries);
-            } else if dlg.tab == DialogTab::Basic && dlg.field == 5 {
-                let entries = app.create_dialog.env_vars.clone();
-                app.create_dialog.env_vars_dialog = EnvVarsDialog::open(entries);
+            } else if let Some(list) = app.create_dialog.focused_list() {
+                open_list_add_dialog(app, list);
             } else if dlg.tab == DialogTab::Basic && dlg.field == 6 {
                 let initial = app.create_dialog.workdir.trim().to_owned();
                 let start = if initial.is_empty() { "/" } else { &initial };
                 app.create_dialog.dir_picker = DirPicker::open(start);
-            } else if dlg.tab == DialogTab::Advanced && dlg.field == 6 {
-                let entries = app.create_dialog.network_rules.clone();
-                app.create_dialog.network_rules_dialog = NetworkRulesDialog::open(entries);
-            } else if dlg.tab == DialogTab::Basic && dlg.field == 7 {
-                let entries = app.create_dialog.mounts.clone();
-                app.create_dialog.mounts_dialog = MountsDialog::open(entries);
-            }
-            // Enter on plain text fields moves to next field.
-            else {
+            } else {
+                // Enter on plain text fields moves to the next field.
                 app.create_dialog.next_field();
             }
         }
@@ -333,10 +350,11 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
             if app.create_dialog.is_toggle_field() || app.create_dialog.is_create_focused() {
                 return;
             }
-            // Managed fields (ports, env vars, workdir) don't accept direct text input.
-            if app.create_dialog.tab == DialogTab::Basic && matches!(app.create_dialog.field, 4..=7)
-            {
+            if app.create_dialog.focused_list().is_some() {
                 return;
+            }
+            if app.create_dialog.tab == DialogTab::Basic && app.create_dialog.field == 6 {
+                return; // workdir — managed via dir picker
             }
             if app.create_dialog.is_numeric_field() && !c.is_ascii_digit() {
                 app.create_dialog.error = Some("Only digits allowed here".into());
@@ -348,6 +366,68 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
             }
         }
         _ => {}
+    }
+}
+
+/// Moves the selection cursor of the given inline list by `delta` (-1 or
+/// +1), clamped to the list's bounds.
+fn move_list_selection(app: &mut App, list: ListField, delta: i32) {
+    fn move_sel(selected: &mut usize, len: usize, delta: i32) {
+        if len == 0 {
+            *selected = 0;
+        } else if delta < 0 {
+            if *selected > 0 {
+                *selected -= 1;
+            }
+        } else if *selected + 1 < len {
+            *selected += 1;
+        }
+    }
+
+    let dlg = &mut app.create_dialog;
+    match list {
+        ListField::EnvVars => move_sel(&mut dlg.env_vars_selected, dlg.env_vars.len(), delta),
+        ListField::Mounts => move_sel(&mut dlg.mounts_selected, dlg.mounts.len(), delta),
+        ListField::Ports => move_sel(&mut dlg.ports_selected, dlg.ports.len(), delta),
+        ListField::NetworkRules => {
+            move_sel(&mut dlg.network_rules_selected, dlg.network_rules.len(), delta)
+        }
+        ListField::Secrets => move_sel(&mut dlg.secrets_selected, dlg.secrets.len(), delta),
+    }
+}
+
+/// Opens the "Add" popup associated with the given inline list.
+fn open_list_add_dialog(app: &mut App, list: ListField) {
+    match list {
+        ListField::EnvVars => app.create_dialog.env_var_add = EnvVarAddDialog::open(),
+        ListField::Mounts => app.create_dialog.mount_add = MountAddDialog::open(),
+        ListField::Ports => app.create_dialog.port_add = PortAddDialog::open(),
+        ListField::NetworkRules => app.create_dialog.net_rule_add = NetRuleAddDialog::open(),
+        ListField::Secrets => app.create_dialog.secret_add = SecretAddDialog::open(),
+    }
+}
+
+/// Deletes the currently selected entry of the given inline list, if any.
+fn delete_list_selected(app: &mut App, list: ListField) {
+    fn remove_selected<T>(entries: &mut Vec<T>, selected: &mut usize) {
+        if entries.is_empty() {
+            return;
+        }
+        entries.remove(*selected);
+        if *selected >= entries.len() && *selected > 0 {
+            *selected -= 1;
+        }
+    }
+
+    let dlg = &mut app.create_dialog;
+    match list {
+        ListField::EnvVars => remove_selected(&mut dlg.env_vars, &mut dlg.env_vars_selected),
+        ListField::Mounts => remove_selected(&mut dlg.mounts, &mut dlg.mounts_selected),
+        ListField::Ports => remove_selected(&mut dlg.ports, &mut dlg.ports_selected),
+        ListField::NetworkRules => {
+            remove_selected(&mut dlg.network_rules, &mut dlg.network_rules_selected)
+        }
+        ListField::Secrets => remove_selected(&mut dlg.secrets, &mut dlg.secrets_selected),
     }
 }
 
@@ -433,206 +513,108 @@ fn handle_picker_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
     }
 }
 
-fn handle_ports_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
-    match app.create_dialog.ports_dialog.mode {
-        SubDialogMode::List => {
-            match code {
-                KeyCode::Esc | KeyCode::Enter => {
-                    // Sync confirmed entries back to the parent field and close.
-                    let entries = app.create_dialog.ports_dialog.entries.clone();
-                    app.create_dialog.ports = entries;
-                    app.create_dialog.ports_dialog.visible = false;
-                }
-                KeyCode::Up => {
-                    if app.create_dialog.ports_dialog.selected > 0 {
-                        app.create_dialog.ports_dialog.selected -= 1;
+fn handle_port_add_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+    match code {
+        KeyCode::Esc => {
+            app.create_dialog.port_add.visible = false;
+        }
+        KeyCode::Tab | KeyCode::Down | KeyCode::BackTab | KeyCode::Up => {
+            let f = app.create_dialog.port_add.add_field;
+            app.create_dialog.port_add.add_field = (f + 1) % 2;
+        }
+        KeyCode::Backspace => {
+            let dlg = &mut app.create_dialog.port_add;
+            if dlg.add_field == 0 {
+                dlg.host_input.pop();
+            } else {
+                dlg.guest_input.pop();
+            }
+            dlg.error = None;
+        }
+        KeyCode::Enter => {
+            if app.create_dialog.port_add.add_field == 0 {
+                app.create_dialog.port_add.add_field = 1;
+            } else {
+                let host = app.create_dialog.port_add.host_input.trim().parse::<u16>();
+                let guest = app.create_dialog.port_add.guest_input.trim().parse::<u16>();
+                match (host, guest) {
+                    (Ok(h), Ok(g)) => {
+                        app.create_dialog.ports.push((h, g));
+                        app.create_dialog.ports_selected = app.create_dialog.ports.len() - 1;
+                        app.create_dialog.port_add.visible = false;
+                    }
+                    (Err(_), _) => {
+                        app.create_dialog.port_add.error = Some("Invalid host port (0–65535)".into());
+                    }
+                    (_, Err(_)) => {
+                        app.create_dialog.port_add.error = Some("Invalid guest port (0–65535)".into());
                     }
                 }
-                KeyCode::Down => {
-                    let len = app.create_dialog.ports_dialog.entries.len();
-                    if len > 0 && app.create_dialog.ports_dialog.selected + 1 < len {
-                        app.create_dialog.ports_dialog.selected += 1;
-                    }
-                }
-                KeyCode::Char('a') | KeyCode::Char('A') => {
-                    app.create_dialog.ports_dialog.mode = SubDialogMode::Add;
-                    app.create_dialog.ports_dialog.host_input.clear();
-                    app.create_dialog.ports_dialog.guest_input.clear();
-                    app.create_dialog.ports_dialog.add_field = 0;
-                    app.create_dialog.ports_dialog.error = None;
-                }
-                KeyCode::Char('d') | KeyCode::Delete => {
-                    let dialog = &mut app.create_dialog.ports_dialog;
-                    if !dialog.entries.is_empty() {
-                        dialog.entries.remove(dialog.selected);
-                        if dialog.selected >= dialog.entries.len() && dialog.selected > 0 {
-                            dialog.selected -= 1;
-                        }
-                        dialog.error = None;
-                    }
-                }
-                _ => {}
             }
         }
-        SubDialogMode::Add => match code {
-            KeyCode::Esc => {
-                app.create_dialog.ports_dialog.mode = SubDialogMode::List;
-                app.create_dialog.ports_dialog.error = None;
+        KeyCode::Char(c) if c.is_ascii_digit() => {
+            let dlg = &mut app.create_dialog.port_add;
+            if dlg.add_field == 0 {
+                dlg.host_input.push(c);
+            } else {
+                dlg.guest_input.push(c);
             }
-            KeyCode::Tab | KeyCode::Down => {
-                let f = app.create_dialog.ports_dialog.add_field;
-                app.create_dialog.ports_dialog.add_field = (f + 1) % 2;
-            }
-            KeyCode::BackTab | KeyCode::Up => {
-                let f = app.create_dialog.ports_dialog.add_field;
-                app.create_dialog.ports_dialog.add_field = (f + 1) % 2;
-            }
-            KeyCode::Backspace => {
-                let dialog = &mut app.create_dialog.ports_dialog;
-                if dialog.add_field == 0 {
-                    dialog.host_input.pop();
-                } else {
-                    dialog.guest_input.pop();
-                }
-                dialog.error = None;
-            }
-            KeyCode::Enter => {
-                let dialog = &mut app.create_dialog.ports_dialog;
-                if dialog.add_field == 0 {
-                    // Move focus to the guest port field.
-                    dialog.add_field = 1;
-                } else {
-                    let host = dialog.host_input.trim().parse::<u16>();
-                    let guest = dialog.guest_input.trim().parse::<u16>();
-                    match (host, guest) {
-                        (Ok(h), Ok(g)) => {
-                            dialog.entries.push((h, g));
-                            dialog.selected = dialog.entries.len().saturating_sub(1);
-                            dialog.mode = SubDialogMode::List;
-                            dialog.error = None;
-                        }
-                        (Err(_), _) => {
-                            dialog.error = Some("Invalid host port (0–65535)".into());
-                        }
-                        (_, Err(_)) => {
-                            dialog.error = Some("Invalid guest port (0–65535)".into());
-                        }
-                    }
-                }
-            }
-            KeyCode::Char(c) if c.is_ascii_digit() => {
-                let dialog = &mut app.create_dialog.ports_dialog;
-                if dialog.add_field == 0 {
-                    dialog.host_input.push(c);
-                } else {
-                    dialog.guest_input.push(c);
-                }
-                dialog.error = None;
-            }
-            _ => {}
-        },
+            dlg.error = None;
+        }
+        _ => {}
     }
 }
 
-fn handle_env_vars_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
-    match app.create_dialog.env_vars_dialog.mode {
-        SubDialogMode::List => {
-            match code {
-                KeyCode::Esc | KeyCode::Enter => {
-                    // Sync confirmed entries back to the parent field and close.
-                    let entries = app.create_dialog.env_vars_dialog.entries.clone();
-                    app.create_dialog.env_vars = entries;
-                    app.create_dialog.env_vars_dialog.visible = false;
+fn handle_env_var_add_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+    match code {
+        KeyCode::Esc => {
+            app.create_dialog.env_var_add.visible = false;
+        }
+        KeyCode::Tab | KeyCode::Down | KeyCode::BackTab | KeyCode::Up => {
+            let f = app.create_dialog.env_var_add.add_field;
+            app.create_dialog.env_var_add.add_field = (f + 1) % 2;
+        }
+        KeyCode::Backspace => {
+            let dlg = &mut app.create_dialog.env_var_add;
+            if dlg.add_field == 0 {
+                dlg.key_input.pop();
+            } else {
+                dlg.value_input.pop();
+            }
+            dlg.error = None;
+        }
+        KeyCode::Enter => {
+            if app.create_dialog.env_var_add.add_field == 0 {
+                app.create_dialog.env_var_add.add_field = 1;
+            } else {
+                let key = app.create_dialog.env_var_add.key_input.trim().to_owned();
+                let value = app.create_dialog.env_var_add.value_input.clone();
+                if key.is_empty() {
+                    app.create_dialog.env_var_add.error = Some("Key cannot be empty".into());
+                } else if key.contains('=') {
+                    app.create_dialog.env_var_add.error = Some("Key must not contain '='".into());
+                } else {
+                    app.create_dialog.env_vars.push((key, value));
+                    app.create_dialog.env_vars_selected = app.create_dialog.env_vars.len() - 1;
+                    app.create_dialog.env_var_add.visible = false;
                 }
-                KeyCode::Up => {
-                    if app.create_dialog.env_vars_dialog.selected > 0 {
-                        app.create_dialog.env_vars_dialog.selected -= 1;
-                    }
-                }
-                KeyCode::Down => {
-                    let len = app.create_dialog.env_vars_dialog.entries.len();
-                    if len > 0 && app.create_dialog.env_vars_dialog.selected + 1 < len {
-                        app.create_dialog.env_vars_dialog.selected += 1;
-                    }
-                }
-                KeyCode::Char('a') | KeyCode::Char('A') => {
-                    app.create_dialog.env_vars_dialog.mode = SubDialogMode::Add;
-                    app.create_dialog.env_vars_dialog.key_input.clear();
-                    app.create_dialog.env_vars_dialog.value_input.clear();
-                    app.create_dialog.env_vars_dialog.add_field = 0;
-                    app.create_dialog.env_vars_dialog.error = None;
-                }
-                KeyCode::Char('d') | KeyCode::Delete => {
-                    let dialog = &mut app.create_dialog.env_vars_dialog;
-                    if !dialog.entries.is_empty() {
-                        dialog.entries.remove(dialog.selected);
-                        if dialog.selected >= dialog.entries.len() && dialog.selected > 0 {
-                            dialog.selected -= 1;
-                        }
-                        dialog.error = None;
-                    }
-                }
-                _ => {}
             }
         }
-        SubDialogMode::Add => match code {
-            KeyCode::Esc => {
-                app.create_dialog.env_vars_dialog.mode = SubDialogMode::List;
-                app.create_dialog.env_vars_dialog.error = None;
+        KeyCode::Char(c) => {
+            let dlg = &mut app.create_dialog.env_var_add;
+            // Disallow '=' in the key field.
+            if dlg.add_field == 0 && c == '=' {
+                dlg.error = Some("Key must not contain '='".into());
+                return;
             }
-            KeyCode::Tab | KeyCode::Down => {
-                let f = app.create_dialog.env_vars_dialog.add_field;
-                app.create_dialog.env_vars_dialog.add_field = (f + 1) % 2;
+            if dlg.add_field == 0 {
+                dlg.key_input.push(c);
+            } else {
+                dlg.value_input.push(c);
             }
-            KeyCode::BackTab | KeyCode::Up => {
-                let f = app.create_dialog.env_vars_dialog.add_field;
-                app.create_dialog.env_vars_dialog.add_field = (f + 1) % 2;
-            }
-            KeyCode::Backspace => {
-                let dialog = &mut app.create_dialog.env_vars_dialog;
-                if dialog.add_field == 0 {
-                    dialog.key_input.pop();
-                } else {
-                    dialog.value_input.pop();
-                }
-                dialog.error = None;
-            }
-            KeyCode::Enter => {
-                let dialog = &mut app.create_dialog.env_vars_dialog;
-                if dialog.add_field == 0 {
-                    // Move focus to the value field.
-                    dialog.add_field = 1;
-                } else {
-                    let key = dialog.key_input.trim().to_owned();
-                    let value = dialog.value_input.clone();
-                    if key.is_empty() {
-                        dialog.error = Some("Key cannot be empty".into());
-                    } else if key.contains('=') {
-                        dialog.error = Some("Key must not contain '='".into());
-                    } else {
-                        dialog.entries.push((key, value));
-                        dialog.selected = dialog.entries.len().saturating_sub(1);
-                        dialog.mode = SubDialogMode::List;
-                        dialog.error = None;
-                    }
-                }
-            }
-            KeyCode::Char(c) => {
-                let dialog = &mut app.create_dialog.env_vars_dialog;
-                // Disallow '=' in the key field.
-                if dialog.add_field == 0 && c == '=' {
-                    dialog.error = Some("Key must not contain '='".into());
-                    return;
-                }
-                if dialog.add_field == 0 {
-                    dialog.key_input.push(c);
-                } else {
-                    dialog.value_input.push(c);
-                }
-                dialog.error = None;
-            }
-            _ => {}
-        },
+            dlg.error = None;
+        }
+        _ => {}
     }
 }
 
@@ -660,206 +642,369 @@ pub(crate) fn validate_cidr(input: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn handle_network_rules_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
-    match app.create_dialog.network_rules_dialog.mode {
-        SubDialogMode::List => match code {
-            KeyCode::Esc | KeyCode::Enter => {
-                // Sync confirmed entries back to the parent field and close.
-                let entries = app.create_dialog.network_rules_dialog.entries.clone();
-                app.create_dialog.network_rules = entries;
-                app.create_dialog.network_rules_dialog.visible = false;
-            }
-            KeyCode::Up => {
-                if app.create_dialog.network_rules_dialog.selected > 0 {
-                    app.create_dialog.network_rules_dialog.selected -= 1;
-                }
-            }
-            KeyCode::Down => {
-                let len = app.create_dialog.network_rules_dialog.entries.len();
-                if len > 0 && app.create_dialog.network_rules_dialog.selected + 1 < len {
-                    app.create_dialog.network_rules_dialog.selected += 1;
-                }
-            }
-            KeyCode::Char('a') | KeyCode::Char('A') => {
-                let dialog = &mut app.create_dialog.network_rules_dialog;
-                dialog.mode = SubDialogMode::Add;
-                dialog.cidr_input.clear();
-                dialog.action = NetRuleAction::Allow;
-                dialog.direction = NetRuleDirection::Egress;
-                dialog.error = None;
-            }
-            KeyCode::Char('d') | KeyCode::Delete => {
-                let dialog = &mut app.create_dialog.network_rules_dialog;
-                if !dialog.entries.is_empty() {
-                    dialog.entries.remove(dialog.selected);
-                    if dialog.selected >= dialog.entries.len() && dialog.selected > 0 {
-                        dialog.selected -= 1;
-                    }
-                    dialog.error = None;
-                }
-            }
-            _ => {}
-        },
-        SubDialogMode::Add => match code {
-            KeyCode::Esc => {
-                app.create_dialog.network_rules_dialog.mode = SubDialogMode::List;
-                app.create_dialog.network_rules_dialog.error = None;
-            }
-            KeyCode::Char('e') | KeyCode::Char('E') => {
-                app.create_dialog.network_rules_dialog.direction = NetRuleDirection::Egress;
-            }
-            KeyCode::Char('i') | KeyCode::Char('I') => {
-                app.create_dialog.network_rules_dialog.direction = NetRuleDirection::Ingress;
-            }
-            KeyCode::Char(' ') => {
-                let dialog = &mut app.create_dialog.network_rules_dialog;
-                dialog.action = match dialog.action {
-                    NetRuleAction::Allow => NetRuleAction::Deny,
-                    NetRuleAction::Deny => NetRuleAction::Allow,
-                };
-            }
-            KeyCode::Backspace => {
-                app.create_dialog.network_rules_dialog.cidr_input.pop();
-                app.create_dialog.network_rules_dialog.error = None;
-            }
-            KeyCode::Enter => {
-                let dialog = &mut app.create_dialog.network_rules_dialog;
-                let cidr = dialog.cidr_input.trim().to_owned();
-                match validate_cidr(&cidr) {
-                    Ok(()) => {
-                        dialog.entries.push(NetworkRule {
-                            cidr,
-                            action: dialog.action,
-                            direction: dialog.direction,
-                        });
-                        dialog.selected = dialog.entries.len().saturating_sub(1);
-                        dialog.mode = SubDialogMode::List;
-                        dialog.error = None;
-                    }
-                    Err(e) => dialog.error = Some(e.to_string()),
-                }
-            }
-            KeyCode::Char(c) => {
-                app.create_dialog.network_rules_dialog.cidr_input.push(c);
-                app.create_dialog.network_rules_dialog.error = None;
-            }
-            _ => {}
-        },
+/// Parse a single port (`"8080"`) or port range (`"1000-2000"`) string.
+fn parse_port_range(input: &str) -> Result<(u16, u16), &'static str> {
+    if let Some((lo, hi)) = input.split_once('-') {
+        let lo: u16 = lo.trim().parse().map_err(|_| "Invalid port range")?;
+        let hi: u16 = hi.trim().parse().map_err(|_| "Invalid port range")?;
+        if lo > hi {
+            return Err("Range start must be <= end");
+        }
+        Ok((lo, hi))
+    } else {
+        let p: u16 = input.trim().parse().map_err(|_| "Invalid port")?;
+        Ok((p, p))
     }
 }
 
-fn handle_mounts_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
-    match app.create_dialog.mounts_dialog.mode {
-        SubDialogMode::List => match code {
-            KeyCode::Esc | KeyCode::Enter => {
-                // Sync confirmed entries back to the parent field and close.
-                let entries = app.create_dialog.mounts_dialog.entries.clone();
-                app.create_dialog.mounts = entries;
-                app.create_dialog.mounts_dialog.visible = false;
+fn handle_net_rule_add_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+    let field = app.create_dialog.net_rule_add.add_field;
+    match code {
+        KeyCode::Esc => {
+            app.create_dialog.net_rule_add.visible = false;
+        }
+        KeyCode::Tab | KeyCode::Down => {
+            app.create_dialog.net_rule_add.add_field = (field + 1) % NetRuleAddDialog::FIELD_COUNT;
+        }
+        KeyCode::BackTab | KeyCode::Up => {
+            app.create_dialog.net_rule_add.add_field =
+                (field + NetRuleAddDialog::FIELD_COUNT - 1) % NetRuleAddDialog::FIELD_COUNT;
+        }
+        KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if field == 0 => {
+            let dlg = &mut app.create_dialog.net_rule_add;
+            dlg.direction = dlg.direction.cycle();
+            dlg.error = None;
+        }
+        KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if field == 1 => {
+            let dlg = &mut app.create_dialog.net_rule_add;
+            dlg.action = dlg.action.cycle();
+            dlg.error = None;
+        }
+        KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if field == 2 => {
+            let dlg = &mut app.create_dialog.net_rule_add;
+            dlg.dest_kind = dlg.dest_kind.cycle();
+            dlg.error = None;
+        }
+        KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
+            if field == 3 && app.create_dialog.net_rule_add.dest_kind == NetRuleDestKind::Group =>
+        {
+            let dlg = &mut app.create_dialog.net_rule_add;
+            dlg.dest_group = dlg.dest_group.cycle();
+            dlg.error = None;
+        }
+        KeyCode::Backspace if field == 3 => {
+            app.create_dialog.net_rule_add.dest_input.pop();
+            app.create_dialog.net_rule_add.error = None;
+        }
+        KeyCode::Char(c)
+            if field == 3 && app.create_dialog.net_rule_add.dest_kind.needs_text_value() =>
+        {
+            app.create_dialog.net_rule_add.dest_input.push(c);
+            app.create_dialog.net_rule_add.error = None;
+        }
+        KeyCode::Left if field == 4 => {
+            let dlg = &mut app.create_dialog.net_rule_add;
+            dlg.protocol_cursor =
+                (dlg.protocol_cursor + NetRuleProtocol::ALL.len() - 1) % NetRuleProtocol::ALL.len();
+        }
+        KeyCode::Right if field == 4 => {
+            let dlg = &mut app.create_dialog.net_rule_add;
+            dlg.protocol_cursor = (dlg.protocol_cursor + 1) % NetRuleProtocol::ALL.len();
+        }
+        KeyCode::Char(' ') if field == 4 => {
+            let dlg = &mut app.create_dialog.net_rule_add;
+            let proto = NetRuleProtocol::ALL[dlg.protocol_cursor];
+            if proto.is_icmp() && dlg.direction == NetRuleDirection::Ingress {
+                dlg.error = Some("ICMP protocols are egress-only".into());
+            } else if let Some(pos) = dlg.protocols.iter().position(|p| *p == proto) {
+                dlg.protocols.remove(pos);
+                dlg.error = None;
+            } else {
+                dlg.protocols.push(proto);
+                dlg.error = None;
             }
-            KeyCode::Up => {
-                if app.create_dialog.mounts_dialog.selected > 0 {
-                    app.create_dialog.mounts_dialog.selected -= 1;
-                }
+        }
+        KeyCode::Backspace if field == 5 => {
+            app.create_dialog.net_rule_add.ports_input.pop();
+            app.create_dialog.net_rule_add.error = None;
+        }
+        KeyCode::Char(c) if field == 5 && (c.is_ascii_digit() || c == '-') => {
+            app.create_dialog.net_rule_add.ports_input.push(c);
+            app.create_dialog.net_rule_add.error = None;
+        }
+        KeyCode::Enter => {
+            if field == NetRuleAddDialog::FIELD_COUNT - 1 {
+                submit_net_rule(app);
+            } else {
+                app.create_dialog.net_rule_add.add_field = field + 1;
             }
-            KeyCode::Down => {
-                let len = app.create_dialog.mounts_dialog.entries.len();
-                if len > 0 && app.create_dialog.mounts_dialog.selected + 1 < len {
-                    app.create_dialog.mounts_dialog.selected += 1;
-                }
-            }
-            KeyCode::Char('a') | KeyCode::Char('A') => {
-                let dialog = &mut app.create_dialog.mounts_dialog;
-                dialog.mode = SubDialogMode::Add;
-                dialog.guest_input.clear();
-                dialog.source_input.clear();
-                dialog.kind = MountKindChoice::Bind;
-                dialog.add_field = 0;
-                dialog.error = None;
-            }
-            KeyCode::Char('d') | KeyCode::Delete => {
-                let dialog = &mut app.create_dialog.mounts_dialog;
-                if !dialog.entries.is_empty() {
-                    dialog.entries.remove(dialog.selected);
-                    if dialog.selected >= dialog.entries.len() && dialog.selected > 0 {
-                        dialog.selected -= 1;
-                    }
-                    dialog.error = None;
-                }
-            }
-            _ => {}
-        },
-        SubDialogMode::Add => match code {
-            KeyCode::Esc => {
-                app.create_dialog.mounts_dialog.mode = SubDialogMode::List;
-                app.create_dialog.mounts_dialog.error = None;
-            }
-            KeyCode::Tab | KeyCode::Down => {
-                let f = app.create_dialog.mounts_dialog.add_field;
-                app.create_dialog.mounts_dialog.add_field = (f + 1) % 2;
-            }
-            KeyCode::BackTab | KeyCode::Up => {
-                let f = app.create_dialog.mounts_dialog.add_field;
-                app.create_dialog.mounts_dialog.add_field = (f + 1) % 2;
-            }
-            KeyCode::Char('b') | KeyCode::Char('B')
-                if app.create_dialog.mounts_dialog.add_field == 1 =>
-            {
-                app.create_dialog.mounts_dialog.kind = MountKindChoice::Bind;
-            }
-            KeyCode::Char('n') | KeyCode::Char('N')
-                if app.create_dialog.mounts_dialog.add_field == 1 =>
-            {
-                app.create_dialog.mounts_dialog.kind = MountKindChoice::Named;
-            }
-            KeyCode::Backspace => {
-                let dialog = &mut app.create_dialog.mounts_dialog;
-                if dialog.add_field == 0 {
-                    dialog.guest_input.pop();
-                } else {
-                    dialog.source_input.pop();
-                }
-                dialog.error = None;
-            }
-            KeyCode::Enter => {
-                let dialog = &mut app.create_dialog.mounts_dialog;
-                if dialog.add_field == 0 {
-                    dialog.add_field = 1;
-                } else {
-                    let guest = dialog.guest_input.trim().to_owned();
-                    let source_val = dialog.source_input.trim().to_owned();
-                    if guest.is_empty() {
-                        dialog.error = Some("Guest path cannot be empty".into());
-                    } else if source_val.is_empty() {
-                        dialog.error = Some("Host path / volume name cannot be empty".into());
-                    } else {
-                        let source = match dialog.kind {
-                            MountKindChoice::Bind => MountSource::Bind(source_val),
-                            MountKindChoice::Named => MountSource::Named(source_val),
-                        };
-                        dialog.entries.push(VolumeMountConfig {
-                            guest_path: guest,
-                            source,
-                        });
-                        dialog.selected = dialog.entries.len().saturating_sub(1);
-                        dialog.mode = SubDialogMode::List;
-                        dialog.error = None;
-                    }
-                }
-            }
-            KeyCode::Char(c) => {
-                let dialog = &mut app.create_dialog.mounts_dialog;
-                if dialog.add_field == 0 {
-                    dialog.guest_input.push(c);
-                } else {
-                    dialog.source_input.push(c);
-                }
-                dialog.error = None;
-            }
-            _ => {}
-        },
+        }
+        _ => {}
     }
 }
+
+/// Validates and, if valid, appends the popup's in-progress rule to the
+/// Network tab's rule list, closing the popup.
+fn submit_net_rule(app: &mut App) {
+    let dlg = app.create_dialog.net_rule_add.clone();
+
+    if dlg.direction == NetRuleDirection::Ingress && dlg.protocols.iter().any(|p| p.is_icmp()) {
+        app.create_dialog.net_rule_add.error = Some("ICMP protocols are egress-only".into());
+        return;
+    }
+
+    let dest_value = dlg.dest_input.trim().to_owned();
+    if dlg.dest_kind.needs_text_value() {
+        if dest_value.is_empty() {
+            app.create_dialog.net_rule_add.error = Some("Destination value is required".into());
+            return;
+        }
+        match dlg.dest_kind {
+            NetRuleDestKind::Ip => {
+                if dest_value.parse::<std::net::IpAddr>().is_err() {
+                    app.create_dialog.net_rule_add.error = Some("Invalid IP address".into());
+                    return;
+                }
+            }
+            NetRuleDestKind::Cidr => {
+                if let Err(e) = validate_cidr(&dest_value) {
+                    app.create_dialog.net_rule_add.error = Some(e.to_string());
+                    return;
+                }
+            }
+            NetRuleDestKind::Domain | NetRuleDestKind::DomainSuffix => {
+                if dest_value.contains(char::is_whitespace) {
+                    app.create_dialog.net_rule_add.error =
+                        Some("Domain must not contain whitespace".into());
+                    return;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let port_range = if dlg.ports_input.trim().is_empty() {
+        None
+    } else {
+        match parse_port_range(dlg.ports_input.trim()) {
+            Ok(pr) => Some(pr),
+            Err(e) => {
+                app.create_dialog.net_rule_add.error = Some(e.to_owned());
+                return;
+            }
+        }
+    };
+
+    app.create_dialog.network_rules.push(NetworkRule {
+        direction: dlg.direction,
+        action: dlg.action,
+        dest_kind: dlg.dest_kind,
+        dest_value,
+        dest_group: dlg.dest_group,
+        protocols: dlg.protocols,
+        port_range,
+    });
+    app.create_dialog.network_rules_selected = app.create_dialog.network_rules.len() - 1;
+    app.create_dialog.net_rule_add.visible = false;
+}
+
+fn handle_mount_add_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+    match code {
+        KeyCode::Esc => {
+            app.create_dialog.mount_add.visible = false;
+        }
+        KeyCode::Tab | KeyCode::Down => {
+            let f = app.create_dialog.mount_add.add_field;
+            app.create_dialog.mount_add.add_field = (f + 1) % 2;
+        }
+        KeyCode::BackTab | KeyCode::Up => {
+            let f = app.create_dialog.mount_add.add_field;
+            app.create_dialog.mount_add.add_field = (f + 1) % 2;
+        }
+        KeyCode::Char('b') | KeyCode::Char('B') if app.create_dialog.mount_add.add_field == 1 => {
+            app.create_dialog.mount_add.kind = MountKindChoice::Bind;
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') if app.create_dialog.mount_add.add_field == 1 => {
+            app.create_dialog.mount_add.kind = MountKindChoice::Named;
+        }
+        KeyCode::Backspace => {
+            let dlg = &mut app.create_dialog.mount_add;
+            if dlg.add_field == 0 {
+                dlg.guest_input.pop();
+            } else {
+                dlg.source_input.pop();
+            }
+            dlg.error = None;
+        }
+        KeyCode::Enter => {
+            if app.create_dialog.mount_add.add_field == 0 {
+                app.create_dialog.mount_add.add_field = 1;
+            } else {
+                let guest = app.create_dialog.mount_add.guest_input.trim().to_owned();
+                let source_val = app.create_dialog.mount_add.source_input.trim().to_owned();
+                if guest.is_empty() {
+                    app.create_dialog.mount_add.error = Some("Guest path cannot be empty".into());
+                } else if source_val.is_empty() {
+                    app.create_dialog.mount_add.error =
+                        Some("Host path / volume name cannot be empty".into());
+                } else {
+                    let source = match app.create_dialog.mount_add.kind {
+                        MountKindChoice::Bind => MountSource::Bind(source_val),
+                        MountKindChoice::Named => MountSource::Named(source_val),
+                    };
+                    app.create_dialog.mounts.push(VolumeMountConfig {
+                        guest_path: guest,
+                        source,
+                    });
+                    app.create_dialog.mounts_selected = app.create_dialog.mounts.len() - 1;
+                    app.create_dialog.mount_add.visible = false;
+                }
+            }
+        }
+        KeyCode::Char(c) => {
+            let dlg = &mut app.create_dialog.mount_add;
+            if dlg.add_field == 0 {
+                dlg.guest_input.push(c);
+            } else {
+                dlg.source_input.push(c);
+            }
+            dlg.error = None;
+        }
+        _ => {}
+    }
+}
+
+fn handle_secret_add_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+    let field = app.create_dialog.secret_add.add_field;
+    let is_toggle = matches!(field, 3..=7);
+    match code {
+        KeyCode::Esc => {
+            app.create_dialog.secret_add.visible = false;
+        }
+        KeyCode::Tab | KeyCode::Down => {
+            app.create_dialog.secret_add.add_field = (field + 1) % SecretAddDialog::FIELD_COUNT;
+        }
+        KeyCode::BackTab | KeyCode::Up => {
+            app.create_dialog.secret_add.add_field =
+                (field + SecretAddDialog::FIELD_COUNT - 1) % SecretAddDialog::FIELD_COUNT;
+        }
+        KeyCode::Char(' ') if is_toggle => {
+            let dlg = &mut app.create_dialog.secret_add;
+            match field {
+                3 => dlg.inject_headers = !dlg.inject_headers,
+                4 => dlg.inject_basic_auth = !dlg.inject_basic_auth,
+                5 => dlg.inject_query = !dlg.inject_query,
+                6 => dlg.inject_body = !dlg.inject_body,
+                7 => dlg.require_tls_identity = !dlg.require_tls_identity,
+                _ => {}
+            }
+            dlg.error = None;
+        }
+        KeyCode::Backspace if !is_toggle => {
+            let dlg = &mut app.create_dialog.secret_add;
+            match field {
+                0 => {
+                    dlg.env_input.pop();
+                }
+                1 => {
+                    dlg.value_input.pop();
+                }
+                2 => {
+                    dlg.hosts_input.pop();
+                }
+                _ => {}
+            }
+            dlg.error = None;
+        }
+        KeyCode::Char(c) if !is_toggle => {
+            let dlg = &mut app.create_dialog.secret_add;
+            match field {
+                0 => {
+                    dlg.env_input.push(c);
+                }
+                1 => {
+                    dlg.value_input.push(c);
+                }
+                2 => {
+                    dlg.hosts_input.push(c);
+                }
+                _ => {}
+            }
+            dlg.error = None;
+        }
+        KeyCode::Enter => {
+            if field == SecretAddDialog::FIELD_COUNT - 1 {
+                submit_secret(app);
+            } else {
+                app.create_dialog.secret_add.add_field = field + 1;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Validates and, if valid, appends the popup's in-progress secret to the
+/// Secrets tab's list, closing the popup.
+fn submit_secret(app: &mut App) {
+    let dlg = app.create_dialog.secret_add.clone();
+
+    let env_var = dlg.env_input.trim().to_owned();
+    if env_var.is_empty() {
+        app.create_dialog.secret_add.error = Some("Env var name cannot be empty".into());
+        return;
+    }
+    if env_var.contains('=') || env_var.contains('\0') {
+        app.create_dialog.secret_add.error = Some("Env var must not contain '=' or NUL".into());
+        return;
+    }
+    let value = dlg.value_input.clone();
+    if value.is_empty() {
+        app.create_dialog.secret_add.error = Some("Value cannot be empty".into());
+        return;
+    }
+    let allowed_hosts: Vec<SecretHostPattern> = dlg
+        .hosts_input
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            if s == "*" {
+                SecretHostPattern {
+                    kind: SecretHostKind::Any,
+                    value: String::new(),
+                }
+            } else if s.contains('*') {
+                SecretHostPattern {
+                    kind: SecretHostKind::Wildcard,
+                    value: s.to_owned(),
+                }
+            } else {
+                SecretHostPattern {
+                    kind: SecretHostKind::Exact,
+                    value: s.to_owned(),
+                }
+            }
+        })
+        .collect();
+    if allowed_hosts.is_empty() {
+        app.create_dialog.secret_add.error = Some("At least one allowed host is required".into());
+        return;
+    }
+
+    app.create_dialog.secrets.push(SecretConfig {
+        env_var,
+        value,
+        allowed_hosts,
+        inject_headers: dlg.inject_headers,
+        inject_basic_auth: dlg.inject_basic_auth,
+        inject_query: dlg.inject_query,
+        inject_body: dlg.inject_body,
+        require_tls_identity: dlg.require_tls_identity,
+    });
+    app.create_dialog.secrets_selected = app.create_dialog.secrets.len() - 1;
+    app.create_dialog.secret_add.visible = false;
+}
+
 
 fn handle_volumes_view_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
     match app.volumes_view.mode {
