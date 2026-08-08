@@ -34,7 +34,7 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
   with live metrics: CPU and memory gauges with rolling sparkline history (last 60
   samples), a writable-overlay disk usage gauge (when reported by the sandbox), disk I/O
   counters, network rx/tx, and uptime
-- **Create dialog** — four-tab modal covering all
+- **Create dialog** — five-tab modal covering all
   [SandboxConfig](https://docs.microsandbox.dev/sdk/rust/sandbox#sandboxconfig) options:
   - **Basic tab**: Name, Image, CPUs / Max CPUs (side by side), Memory / Max Memory
     (side by side), Working directory (with interactive directory picker — the picked
@@ -45,14 +45,15 @@ official [microsandbox Rust SDK](https://crates.io/crates/microsandbox).
     add via a popup, `d` to delete the selected entry), Volume mounts (inline list, bind
     a host directory or attach a named volume — applied only when the sandbox is
     created; the SDK does not support changing mounts on an already-running sandbox)
-  - **Network tab**: Disable network toggle, Port mappings (inline list), Network policy
+  - **Network tab**: Network access toggle, default ingress/egress actions, Port mappings (inline list), Network policy
     rules (inline list) — supports the full range of the SDK's
     [network policy](https://docs.microsandbox.dev/sdk/rust/networking) options: Egress /
     Ingress / Any direction, Allow / Deny action, and Any / IP / CIDR / Domain / Domain
     suffix / Group destination kinds, with optional protocol (TCP/UDP/ICMP) and port
     range filters — applied only when the sandbox is created; the SDK does not support
     changing network policy on an already-running sandbox
-  - **Secrets tab**: Injected secrets (inline list) — each secret maps an environment
+  - **DNS tab**: DNS nameservers, DNS timeout, and DNS rebinding protection
+  - **Security tab**: Injected secrets (inline list) plus TLS interception settings — each secret maps an environment
     variable name to a value, a set of allowed hosts, and which
     [injection surfaces](https://docs.microsandbox.dev/sdk/rust/secrets) (HTTP headers,
     HTTP basic auth, query parameters, request body) it may be injected into, plus an
@@ -121,9 +122,9 @@ active, so it never interferes with those modal flows.
 | Key | Action |
 |-----|--------|
 | `Tab` / `↑` / `↓` | Move between fields |
-| `◄` / `►` | Switch between Basic / Guest OS / Network / Security tabs |
-| `Space` | Toggle boolean fields (e.g. Disable Network, injection toggles) |
-| `Ctrl-F` | Open directory picker (Workdir field) |
+| `◄` / `►` | Switch between Basic / Guest OS / Network / DNS / Security tabs |
+| `Space` | Toggle boolean fields, including Network access and Default Ingress/Egress |
+| `Ctrl-F` | Open directory picker (Workdir field, or Bind mount source in mount popup) |
 | `Enter` on a list | Enter list edit mode; `Enter` again edits selected row |
 | `↑` / `↓` | Navigate fields normally; in list edit mode, move selected list row |
 | `a` | Add a new entry to the focused inline list (in list edit mode) |
@@ -134,7 +135,9 @@ active, so it never interferes with those modal flows.
 
 Create-dialog required fields are marked with `*`: Name, Image, CPUs, Memory, Shell.
 
-Network tab also exposes No Net, default ingress/egress action, DNS nameservers, DNS timeout, and DNS rebinding protection. Net Rules are ordered first-match-wins.
+Network tab exposes Network access, default ingress/egress action, Ports, and Net Rules. Net Rules are ordered first-match-wins.
+
+When Network access is Disabled, Default Ingress/Egress, Ports, Net Rules, all DNS fields, and the TLS-specific Security fields are dimmed and skipped in field navigation.
 
 Security tab includes User, TLS interception toggles/settings, sandbox-wide secret violation action / passthrough host lists, and Secrets.
 
@@ -164,8 +167,10 @@ of the microsandbox SDK).
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `↑` / `↓` | Move between the guest-path and source fields |
+| `Tab` / `↑` / `↓` | Move between kind, guest path, and source fields |
 | `b` / `n` | Choose bind mount / named volume source kind |
+| `Ctrl-F` | Open directory picker for a Bind mount source |
+| `Ctrl-N` | Start creating a new named volume inline |
 | `Enter` | Advance to the next field, or add the mount when on the last field |
 | `Esc` | Cancel and close the popup |
 
