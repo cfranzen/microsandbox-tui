@@ -382,8 +382,6 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             ("Tab/◄►", "navigate"),
             ("Enter", if dlg.list_edit_mode { "edit" } else { "edit mode" }),
             ("↑↓", if dlg.list_edit_mode { "select" } else { "field" }),
-            ("a", "add"),
-            ("d", "delete"),
             ("Esc", "cancel"),
         ]
     } else {
