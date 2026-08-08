@@ -641,8 +641,6 @@ fn render_list_field<T>(
         " ↑↓ select · Enter edit · a add · d delete"
     } else if focused {
         " press Enter to edit"
-    } else if entries.is_empty() {
-        " press Enter/a to add"
     } else {
         ""
     };
@@ -1354,4 +1352,3 @@ fn centred_rect(percent_width: u16, height: u16, area: Rect) -> Rect {
 
     horizontal[1]
 }
-
