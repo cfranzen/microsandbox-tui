@@ -355,11 +355,25 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
         KeyCode::Tab | KeyCode::Down => app.create_dialog.next_field(),
         KeyCode::BackTab | KeyCode::Up => app.create_dialog.prev_field(),
         KeyCode::Char(' ') if app.create_dialog.is_toggle_field() => {
+            if app
+                .create_dialog
+                .field_disabled_by_network(app.create_dialog.tab, app.create_dialog.field)
+            {
+                return;
+            }
             match (app.create_dialog.tab, app.create_dialog.field) {
                 (DialogTab::Network, 0) => {
                     app.create_dialog.disable_network = !app.create_dialog.disable_network;
                 }
-                (DialogTab::Network, 4) => {
+                (DialogTab::Network, 1) => {
+                    app.create_dialog.default_ingress_action =
+                        app.create_dialog.default_ingress_action.cycle();
+                }
+                (DialogTab::Network, 2) => {
+                    app.create_dialog.default_egress_action =
+                        app.create_dialog.default_egress_action.cycle();
+                }
+                (DialogTab::Dns, 2) => {
                     app.create_dialog.dns_rebind_protection =
                         !app.create_dialog.dns_rebind_protection;
                 }
@@ -377,15 +391,19 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
             app.create_dialog.error = None;
         }
         KeyCode::Left | KeyCode::Right if !app.create_dialog.is_create_focused() => {
+            if app
+                .create_dialog
+                .field_disabled_by_network(app.create_dialog.tab, app.create_dialog.field)
+            {
+                let tab = if code == KeyCode::Left {
+                    app.create_dialog.tab.prev()
+                } else {
+                    app.create_dialog.tab.next()
+                };
+                app.create_dialog.switch_tab(tab);
+                return;
+            }
             match (app.create_dialog.tab, app.create_dialog.field) {
-                (DialogTab::Network, 1) => {
-                    app.create_dialog.default_ingress_action =
-                        app.create_dialog.default_ingress_action.cycle();
-                }
-                (DialogTab::Network, 2) => {
-                    app.create_dialog.default_egress_action =
-                        app.create_dialog.default_egress_action.cycle();
-                }
                 (DialogTab::Security, 6) => {
                     app.create_dialog.violation_action = app.create_dialog.violation_action.cycle();
                 }
@@ -404,6 +422,11 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
             let dlg = &app.create_dialog;
             if dlg.is_create_focused() {
                 submit_create_dialog(app);
+            } else if app
+                .create_dialog
+                .field_disabled_by_network(app.create_dialog.tab, app.create_dialog.field)
+            {
+                return;
             } else if app.create_dialog.focused_list().is_some() {
                 app.create_dialog.list_edit_mode = true;
                 app.create_dialog.error = None;
@@ -416,13 +439,24 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
             }
         }
         KeyCode::Backspace => {
+            if app
+                .create_dialog
+                .field_disabled_by_network(app.create_dialog.tab, app.create_dialog.field)
+            {
+                return;
+            }
             if let Some(field) = app.create_dialog.current_field_mut() {
                 field.pop();
             }
             app.create_dialog.error = None;
         }
         KeyCode::Char(c) => {
-            if app.create_dialog.is_toggle_field() || app.create_dialog.is_create_focused() {
+            if app.create_dialog.is_toggle_field()
+                || app.create_dialog.is_create_focused()
+                || app
+                    .create_dialog
+                    .field_disabled_by_network(app.create_dialog.tab, app.create_dialog.field)
+            {
                 return;
             }
             if app.create_dialog.focused_list().is_some() {

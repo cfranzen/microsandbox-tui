@@ -18,14 +18,16 @@ pub enum DialogTab {
     Basic,
     GuestOs,
     Network,
+    Dns,
     Security,
 }
 
 impl DialogTab {
-    const ALL: [DialogTab; 4] = [
+    const ALL: [DialogTab; 5] = [
         DialogTab::Basic,
         DialogTab::GuestOs,
         DialogTab::Network,
+        DialogTab::Dns,
         DialogTab::Security,
     ];
 
@@ -44,6 +46,7 @@ impl DialogTab {
             DialogTab::Basic => "Basic",
             DialogTab::GuestOs => "Guest OS",
             DialogTab::Network => "Network",
+            DialogTab::Dns => "DNS",
             DialogTab::Security => "Security",
         }
     }
@@ -560,6 +563,10 @@ pub struct CreateDialog {
 }
 
 impl CreateDialog {
+    const NETWORK_FIELDS: [usize; 5] = [0, 1, 2, 3, 4];
+    const DNS_FIELDS: [usize; 3] = [0, 1, 2];
+    const SECURITY_TLS_FIELDS: [usize; 5] = [1, 2, 3, 4, 5];
+
     pub fn open() -> Self {
         Self {
             visible: true,
@@ -611,7 +618,8 @@ impl CreateDialog {
         match self.tab {
             DialogTab::Basic => 7, // name image cpus max_cpus memory max_memory workdir
             DialogTab::GuestOs => 4,
-            DialogTab::Network => 7,
+            DialogTab::Network => 4,
+            DialogTab::Dns => 3,
             DialogTab::Security => 10,
         }
     }
@@ -627,17 +635,12 @@ impl CreateDialog {
     }
 
     pub fn next_field(&mut self) {
-        self.field = (self.field + 1) % self.field_count();
+        self.field = self.next_enabled_field_index(self.field, true);
         self.list_edit_mode = false;
     }
 
     pub fn prev_field(&mut self) {
-        let count = self.field_count();
-        self.field = if self.field == 0 {
-            count - 1
-        } else {
-            self.field - 1
-        };
+        self.field = self.next_enabled_field_index(self.field, false);
         self.list_edit_mode = false;
     }
 
@@ -672,8 +675,11 @@ impl CreateDialog {
                 _ => None,
             },
             DialogTab::Network => match self.field {
-                5 => Some(&mut self.dns_nameservers),
-                6 => Some(&mut self.dns_query_timeout_ms),
+                _ => None,
+            },
+            DialogTab::Dns => match self.field {
+                0 => Some(&mut self.dns_nameservers),
+                1 => Some(&mut self.dns_query_timeout_ms),
                 _ => None,
             },
             DialogTab::Security => match self.field {
@@ -693,7 +699,7 @@ impl CreateDialog {
             return false;
         }
         (self.tab == DialogTab::Basic && matches!(self.field, 2 | 3 | 4 | 5))
-            || (self.tab == DialogTab::Network && self.field == 6)
+            || (self.tab == DialogTab::Dns && self.field == 1)
     }
 
     /// True when the focused field is a boolean toggle activated by Space.
@@ -701,7 +707,9 @@ impl CreateDialog {
         !self.is_create_focused()
             && matches!(
                 (self.tab, self.field),
-                (DialogTab::Network, 0 | 1 | 2 | 4) | (DialogTab::Security, 1 | 4 | 5 | 6)
+                (DialogTab::Network, 0 | 1 | 2)
+                    | (DialogTab::Dns, 2)
+                    | (DialogTab::Security, 1 | 4 | 5 | 6)
             )
     }
 
@@ -714,11 +722,41 @@ impl CreateDialog {
         match (self.tab, self.field) {
             (DialogTab::GuestOs, 2) => Some(ListField::EnvVars),
             (DialogTab::GuestOs, 3) => Some(ListField::Mounts),
-            (DialogTab::Network, 3) => Some(ListField::Ports),
-            (DialogTab::Network, 4) => Some(ListField::NetworkRules),
+            (DialogTab::Network, 2) => Some(ListField::Ports),
+            (DialogTab::Network, 3) => Some(ListField::NetworkRules),
             (DialogTab::Security, 9) => Some(ListField::Secrets),
             _ => None,
         }
+    }
+
+    pub fn field_disabled_by_network(&self, tab: DialogTab, field_idx: usize) -> bool {
+        if !self.disable_network {
+            return false;
+        }
+        match tab {
+            DialogTab::Network => Self::NETWORK_FIELDS.contains(&field_idx) && field_idx != 0,
+            DialogTab::Dns => Self::DNS_FIELDS.contains(&field_idx),
+            DialogTab::Security => Self::SECURITY_TLS_FIELDS.contains(&field_idx),
+            _ => false,
+        }
+    }
+
+    pub fn next_enabled_field_index(&self, current: usize, forward: bool) -> usize {
+        let count = self.field_count();
+        let mut idx = current;
+        for _ in 0..count {
+            idx = if forward {
+                (idx + 1) % count
+            } else if idx == 0 {
+                count - 1
+            } else {
+                idx - 1
+            };
+            if idx == self.form_field_count() || !self.field_disabled_by_network(self.tab, idx) {
+                return idx;
+            }
+        }
+        current
     }
 }
 

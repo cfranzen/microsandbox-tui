@@ -70,11 +70,15 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         ]),
         DialogTab::Network => constraints.extend([
             Constraint::Length(FIELD_HEIGHT),
-            Constraint::Length(FIELD_HEIGHT),
             Constraint::Length(LIST_HEIGHT),
             Constraint::Min(TALL_LIST_HEIGHT),
+            Constraint::Min(0),
+        ]),
+        DialogTab::Dns => constraints.extend([
             Constraint::Length(FIELD_HEIGHT),
             Constraint::Length(FIELD_HEIGHT),
+            Constraint::Length(FIELD_HEIGHT),
+            Constraint::Min(0),
         ]),
         DialogTab::Security => constraints.extend([
             Constraint::Length(FIELD_HEIGHT),
@@ -105,8 +109,8 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 dlg.workdir.clone()
             };
-            render_field(f, theme, "Name", &dlg.name, dlg.field == 0, chunks[2], true);
-            render_field(f, theme, "Image", &dlg.image, dlg.field == 1, chunks[3], true);
+            render_field(f, theme, "Name", &dlg.name, dlg.field == 0, chunks[2], true, false);
+            render_field(f, theme, "Image", &dlg.image, dlg.field == 1, chunks[3], true, false);
             render_field_pair(
                 f,
                 theme,
@@ -144,8 +148,8 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             );
         }
         DialogTab::GuestOs => {
-            render_field(f, theme, "Hostname", &dlg.hostname, dlg.field == 0, chunks[2], false);
-            render_field(f, theme, "Shell", &dlg.shell, dlg.field == 1, chunks[3], true);
+            render_field(f, theme, "Hostname", &dlg.hostname, dlg.field == 0, chunks[2], false, false);
+            render_field(f, theme, "Shell", &dlg.shell, dlg.field == 1, chunks[3], true, false);
             render_list_field(
                 f,
                 theme,
@@ -156,6 +160,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 dlg.list_edit_mode,
                 |(k, v)| format!("{k}={v}"),
                 chunks[4],
+                false,
             );
             render_list_field(
                 f,
@@ -167,6 +172,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 dlg.list_edit_mode,
                 format_mount_entry,
                 chunks[5],
+                false,
             );
         }
         DialogTab::Network => {
@@ -178,24 +184,33 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                     Constraint::Percentage(34),
                 ])
                 .split(chunks[2]);
-            render_toggle(f, theme, "No Net", dlg.disable_network, dlg.field == 0, row[0]);
-            render_cycle_field(
+            render_toggle(
                 f,
                 theme,
-                "Default In",
-                dlg.default_ingress_action.label(),
-                dlg.field == 1,
-                row[1],
-                dlg.disable_network,
+                "Network access",
+                !dlg.disable_network,
+                dlg.field == 0,
+                row[0],
+                false,
+                Some(("Enabled", "Disabled")),
             );
             render_cycle_field(
                 f,
                 theme,
-                "Default Out",
+                "Default Ingress",
+                dlg.default_ingress_action.label(),
+                dlg.field == 1,
+                row[1],
+                dlg.field_disabled_by_network(DialogTab::Network, 1),
+            );
+            render_cycle_field(
+                f,
+                theme,
+                "Default Egress",
                 dlg.default_egress_action.label(),
                 dlg.field == 2,
                 row[2],
-                dlg.disable_network,
+                dlg.field_disabled_by_network(DialogTab::Network, 2),
             );
             render_list_field(
                 f,
@@ -203,10 +218,11 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 "Ports",
                 &dlg.ports,
                 dlg.ports_selected,
-                dlg.field == 3,
+                dlg.field == 2,
                 dlg.list_edit_mode,
                 |(h, g)| format!("{h} → {g}"),
                 chunks[3],
+                dlg.field_disabled_by_network(DialogTab::Network, 2),
             );
             render_list_field(
                 f,
@@ -214,45 +230,57 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 "Net Rules (first match wins)",
                 &dlg.network_rules,
                 dlg.network_rules_selected,
-                dlg.field == 4,
+                dlg.field == 3,
                 dlg.list_edit_mode,
                 NetworkRule::summary,
                 chunks[4],
+                dlg.field_disabled_by_network(DialogTab::Network, 3),
             );
+        }
+        DialogTab::Dns => {
             render_field(
                 f,
                 theme,
-                "DNS NS",
+                "DNS Nameservers",
                 &dlg.dns_nameservers,
-                dlg.field == 5,
-                chunks[5],
+                dlg.field == 0,
+                chunks[2],
                 false,
+                dlg.field_disabled_by_network(DialogTab::Dns, 0),
             );
-            let dns_row = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
-                .split(chunks[6]);
             render_field(
                 f,
                 theme,
                 "DNS Timeout",
                 &dlg.dns_query_timeout_ms,
-                dlg.field == 6,
-                dns_row[0],
+                dlg.field == 1,
+                chunks[3],
                 false,
+                dlg.field_disabled_by_network(DialogTab::Dns, 1),
             );
             render_toggle(
                 f,
                 theme,
-                "Rebind Protect",
+                "Rebind Protection",
                 dlg.dns_rebind_protection,
-                dlg.field == 4,
-                dns_row[1],
+                dlg.field == 2,
+                chunks[4],
+                dlg.field_disabled_by_network(DialogTab::Dns, 2),
+                None,
             );
         }
         DialogTab::Security => {
-            render_field(f, theme, "User", &dlg.user, dlg.field == 0, chunks[2], false);
-            render_toggle(f, theme, "TLS", dlg.tls_enabled, dlg.field == 1, chunks[3]);
+            render_field(f, theme, "User", &dlg.user, dlg.field == 0, chunks[2], false, false);
+            render_toggle(
+                f,
+                theme,
+                "TLS",
+                dlg.tls_enabled,
+                dlg.field == 1,
+                chunks[3],
+                dlg.field_disabled_by_network(DialogTab::Security, 1),
+                None,
+            );
             render_field(
                 f,
                 theme,
@@ -261,6 +289,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 dlg.field == 2,
                 chunks[4],
                 false,
+                dlg.field_disabled_by_network(DialogTab::Security, 2),
             );
             render_field(
                 f,
@@ -270,6 +299,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 dlg.field == 3,
                 chunks[5],
                 false,
+                dlg.field_disabled_by_network(DialogTab::Security, 3),
             );
             let tls_row = Layout::default()
                 .direction(Direction::Horizontal)
@@ -282,6 +312,8 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 dlg.tls_verify_upstream,
                 dlg.field == 4,
                 tls_row[0],
+                dlg.field_disabled_by_network(DialogTab::Security, 4),
+                None,
             );
             render_toggle(
                 f,
@@ -290,6 +322,8 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 dlg.tls_block_quic,
                 dlg.field == 5,
                 tls_row[1],
+                dlg.field_disabled_by_network(DialogTab::Security, 5),
+                None,
             );
             render_cycle_field(
                 f,
@@ -310,6 +344,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 dlg.list_edit_mode,
                 SecretConfig::summary,
                 chunks[10],
+                false,
             );
             render_field(
                 f,
@@ -319,6 +354,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 dlg.field == 7,
                 chunks[8],
                 false,
+                false,
             );
             render_field(
                 f,
@@ -327,6 +363,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 &dlg.violation_passthrough_patterns,
                 dlg.field == 8,
                 chunks[9],
+                false,
                 false,
             );
         }
@@ -354,7 +391,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             (DialogTab::Basic, 6) => &[
                 ("Tab/↑↓", "navigate"),
                 ("◄►", "tab"),
-                ("Enter", "browse"),
+                ("Ctrl-F/Enter", "browse"),
                 ("Esc", "cancel"),
             ],
             (DialogTab::Network, 0) => &[
@@ -400,6 +437,7 @@ fn render_tab_bar(f: &mut Frame, theme: &Theme, tab: DialogTab, area: Rect) {
         (DialogTab::Basic.title(), tab == DialogTab::Basic),
         (DialogTab::GuestOs.title(), tab == DialogTab::GuestOs),
         (DialogTab::Network.title(), tab == DialogTab::Network),
+        (DialogTab::Dns.title(), tab == DialogTab::Dns),
         (DialogTab::Security.title(), tab == DialogTab::Security),
     ];
     let (spans, _) = theme.tab_bar(&labels);
@@ -415,6 +453,7 @@ fn render_field(
     focused: bool,
     area: Rect,
     required: bool,
+    disabled: bool,
 ) {
     let label_style = if focused {
         theme.text_bold()
@@ -452,7 +491,9 @@ fn render_field(
         format!(" {value}")
     };
 
-    let value_style = if focused {
+    let value_style = if disabled {
+        theme.muted()
+    } else if focused {
         theme.text()
     } else {
         theme.secondary()
@@ -483,8 +524,8 @@ fn render_field_pair(
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
-    render_field(f, theme, label_a, value_a, focused_a, cols[0], required_a);
-    render_field(f, theme, label_b, value_b, focused_b, cols[1], required_b);
+    render_field(f, theme, label_a, value_a, focused_a, cols[0], required_a, false);
+    render_field(f, theme, label_b, value_b, focused_b, cols[1], required_b, false);
 }
 
 fn render_toggle(
@@ -494,6 +535,8 @@ fn render_toggle(
     value: bool,
     focused: bool,
     area: Rect,
+    disabled: bool,
+    labels: Option<(&str, &str)>,
 ) {
     let label_style = if focused {
         theme.text_bold()
@@ -516,10 +559,21 @@ fn render_toggle(
         inner.width,
         inner.height.min(1),
     );
-    let (text, style) = if value {
-        (" ● On", theme.success())
+    let on_text = labels.map(|v| v.0).unwrap_or("On");
+    let off_text = labels.map(|v| v.1).unwrap_or("Off");
+    let (text, style) = if disabled {
+        (
+            if value {
+                format!(" ● {on_text}")
+            } else {
+                format!(" ○ {off_text}")
+            },
+            theme.muted(),
+        )
+    } else if value {
+        (format!(" [ {on_text} ]"), theme.success_bold())
     } else {
-        (" ○ Off", theme.muted())
+        (format!(" [ {off_text} ]"), theme.danger_bold())
     };
 
     f.render_widget(Paragraph::new(Span::styled(text, style)), text_area);
@@ -579,6 +633,7 @@ fn render_list_field<T>(
     edit_mode: bool,
     format_entry: impl Fn(&T) -> String,
     area: Rect,
+    disabled: bool,
 ) {
     let label_style = if focused {
         theme.text_bold()
@@ -614,7 +669,9 @@ fn render_list_field<T>(
         let end = (scroll + visible).min(entries.len());
         for (row, idx) in (scroll..end).enumerate() {
             let is_sel = focused && edit_mode && idx == selected;
-            let style = if is_sel {
+            let style = if disabled {
+                theme.muted()
+            } else if is_sel {
                 theme.selected()
             } else {
                 theme.text()
@@ -632,12 +689,16 @@ fn render_list_field<T>(
         }
     }
 
-    let hint_style = if focused {
+    let hint_style = if disabled {
+        theme.muted()
+    } else if focused {
         theme.accent()
     } else {
         theme.muted()
     };
-    let hint_text = if focused && edit_mode {
+    let hint_text = if disabled {
+        ""
+    } else if focused && edit_mode {
         " ↑↓ select · Enter edit · a add · d delete"
     } else if focused {
         " press Enter to edit"
@@ -777,6 +838,7 @@ fn render_port_add_dialog(f: &mut Frame, app: &App, area: Rect) {
         dialog.add_field == 0,
         chunks[1],
         false,
+        false,
     );
     render_field(
         f,
@@ -785,6 +847,7 @@ fn render_port_add_dialog(f: &mut Frame, app: &App, area: Rect) {
         &dialog.guest_input,
         dialog.add_field == 1,
         chunks[2],
+        false,
         false,
     );
 
@@ -852,6 +915,7 @@ fn render_env_var_add_dialog(f: &mut Frame, app: &App, area: Rect) {
         dialog.add_field == 0,
         chunks[1],
         false,
+        false,
     );
     render_field(
         f,
@@ -860,6 +924,7 @@ fn render_env_var_add_dialog(f: &mut Frame, app: &App, area: Rect) {
         &dialog.value_input,
         dialog.add_field == 1,
         chunks[2],
+        false,
         false,
     );
 
@@ -1071,6 +1136,7 @@ fn render_net_rule_add_dialog(f: &mut Frame, app: &App, area: Rect) {
             dialog.add_field == 3,
             chunks[2],
             false,
+            false,
         );
     }
 
@@ -1103,6 +1169,7 @@ fn render_net_rule_add_dialog(f: &mut Frame, app: &App, area: Rect) {
         &dialog.ports_input,
         dialog.add_field == 5,
         chunks[4],
+        false,
         false,
     );
 
@@ -1203,6 +1270,7 @@ fn render_mount_add_dialog(f: &mut Frame, app: &App, area: Rect) {
         &dialog.guest_input,
         dialog.add_field == 1,
         chunks[1],
+        false,
         false,
     );
     match dialog.kind {
@@ -1338,6 +1406,7 @@ fn render_secret_add_dialog(f: &mut Frame, app: &App, area: Rect) {
         dialog.add_field == 0,
         chunks[0],
         false,
+        false,
     );
     let masked_value: String = "*".repeat(dialog.value_input.chars().count());
     render_field(
@@ -1348,6 +1417,7 @@ fn render_secret_add_dialog(f: &mut Frame, app: &App, area: Rect) {
         dialog.add_field == 1,
         chunks[1],
         false,
+        false,
     );
     render_field(
         f,
@@ -1356,6 +1426,7 @@ fn render_secret_add_dialog(f: &mut Frame, app: &App, area: Rect) {
         &dialog.hosts_input,
         dialog.add_field == 2,
         chunks[2],
+        false,
         false,
     );
 
