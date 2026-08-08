@@ -663,7 +663,7 @@ fn test_esc_exits_list_edit_mode_only() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
     app.create_dialog.switch_tab(DialogTab::Network);
-    app.create_dialog.field = 1;
+    app.create_dialog.field = 3;
     handle_event(&mut app, key_press(KeyCode::Enter));
     assert!(app.create_dialog.list_edit_mode);
     handle_event(&mut app, key_press(KeyCode::Esc));
