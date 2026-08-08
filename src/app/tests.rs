@@ -899,9 +899,9 @@ fn test_dialog_net_rule_add_dialog_add_entry() {
     handle_event(&mut app, key_press(KeyCode::Char('a')));
     assert!(app.create_dialog.net_rule_add.visible);
 
-    // Direction: Egress -> Ingress.
-    handle_event(&mut app, key_press(KeyCode::Right));
     // Action: Allow -> Deny.
+    handle_event(&mut app, key_press(KeyCode::Right));
+    // Direction: Egress -> Ingress.
     handle_event(&mut app, key_press(KeyCode::Tab));
     handle_event(&mut app, key_press(KeyCode::Right));
     // Dest kind: Any -> Ip -> Cidr.
@@ -977,7 +977,7 @@ fn test_dialog_network_rules_delete_entry() {
         dest_value: "1.2.3.0/24".into(),
         dest_group: NetRuleDestGroup::Public,
         protocols: vec![],
-        port_range: None,
+        port_ranges: Vec::new(),
     }];
     app.create_dialog.field = 4; // network rules list
     handle_event(&mut app, key_press(KeyCode::Enter));
@@ -1307,7 +1307,7 @@ fn test_edit_net_rule_replaces_entry() {
         dest_value: "a.com".into(),
         dest_group: NetRuleDestGroup::Public,
         protocols: vec![],
-        port_range: None,
+        port_ranges: Vec::new(),
     };
     app.create_dialog.network_rules = vec![rule.clone()];
     app.create_dialog.net_rule_add = NetRuleAddDialog::open_for_edit(0, &rule);
@@ -1578,7 +1578,7 @@ fn test_network_default_action_cycles() {
     app.create_dialog.switch_tab(DialogTab::Network);
     app.create_dialog.field = 1;
     handle_event(&mut app, key_press(KeyCode::Char(' ')));
-    assert_eq!(app.create_dialog.default_ingress_action, NetRuleAction::Deny);
+    assert_eq!(app.create_dialog.default_ingress_action, NetRuleAction::Allow);
 }
 
 #[test]
@@ -1594,7 +1594,7 @@ fn test_net_rule_reorder_plus_minus() {
             dest_value: "a.com".into(),
             dest_group: NetRuleDestGroup::Public,
             protocols: vec![],
-            port_range: None,
+            port_ranges: Vec::new(),
         },
         NetworkRule {
             direction: NetRuleDirection::Egress,
@@ -1603,7 +1603,7 @@ fn test_net_rule_reorder_plus_minus() {
             dest_value: "b.com".into(),
             dest_group: NetRuleDestGroup::Public,
             protocols: vec![],
-            port_range: None,
+            port_ranges: Vec::new(),
         },
     ];
     app.create_dialog.network_rules_selected = 1;

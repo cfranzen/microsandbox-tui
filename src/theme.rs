@@ -58,6 +58,10 @@ pub struct Theme {
     pub text_secondary: Color,
     /// Muted/dim text — hints, timestamps, labels, unfocused borders.
     pub text_muted: Color,
+    /// Disabled-field text — a distinct, dimmer grey than `text_muted` so
+    /// fields gated off (e.g. by "Network access: Disabled") read as
+    /// unavailable rather than merely unfocused.
+    pub text_disabled: Color,
 
     // Accents -------------------------------------------------------------
     /// Primary accent — focused-panel borders, active tab, headings,
@@ -113,6 +117,7 @@ impl Theme {
             text: Color::White,
             text_secondary: Color::Gray,
             text_muted: Color::DarkGray,
+            text_disabled: Color::Rgb(80, 80, 80),
             accent: Color::Cyan,
             accent_alt: Color::Magenta,
             on_accent: Color::Black,
@@ -137,6 +142,7 @@ impl Theme {
             text: Color::Black,
             text_secondary: Color::Rgb(60, 60, 60),
             text_muted: Color::Rgb(120, 120, 120),
+            text_disabled: Color::Rgb(190, 190, 190),
             accent: Color::Blue,
             accent_alt: Color::Magenta,
             on_accent: Color::White,
@@ -176,9 +182,17 @@ impl Theme {
         Style::default().fg(self.text_secondary)
     }
 
-    /// Muted/dim text — hints, timestamps, disabled state.
+    /// Muted/dim text — hints, timestamps, secondary chrome.
     pub fn muted(&self) -> Style {
         Style::default().fg(self.text_muted)
+    }
+
+    /// Style for a field, list, or toggle that is currently gated off
+    /// (e.g. a Network-tab field while "Network access" is Disabled).
+    /// Deliberately a different shade than [`Self::muted`] so disabled
+    /// state is visually distinct from a merely-unfocused field.
+    pub fn disabled(&self) -> Style {
+        Style::default().fg(self.text_disabled)
     }
 
     /// Primary accent color.

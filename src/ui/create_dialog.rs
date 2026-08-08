@@ -72,7 +72,6 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             Constraint::Length(FIELD_HEIGHT),
             Constraint::Length(LIST_HEIGHT),
             Constraint::Min(TALL_LIST_HEIGHT),
-            Constraint::Min(0),
         ]),
         DialogTab::Dns => constraints.extend([
             Constraint::Length(FIELD_HEIGHT),
@@ -215,7 +214,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             render_list_field(
                 f,
                 theme,
-                "Ports",
+                "Port Mappings",
                 &dlg.ports,
                 dlg.ports_selected,
                 dlg.field == 3,
@@ -453,7 +452,9 @@ fn render_field(
     required: bool,
     disabled: bool,
 ) {
-    let label_style = if focused {
+    let label_style = if disabled {
+        theme.disabled().add_modifier(Modifier::BOLD)
+    } else if focused {
         theme.text_bold()
     } else {
         theme.muted().add_modifier(Modifier::BOLD)
@@ -490,7 +491,7 @@ fn render_field(
     };
 
     let value_style = if disabled {
-        theme.muted()
+        theme.disabled()
     } else if focused {
         theme.text()
     } else {
@@ -536,7 +537,9 @@ fn render_toggle(
     disabled: bool,
     labels: Option<(&str, &str)>,
 ) {
-    let label_style = if focused {
+    let label_style = if disabled {
+        theme.disabled().add_modifier(Modifier::BOLD)
+    } else if focused {
         theme.text_bold()
     } else {
         theme.muted().add_modifier(Modifier::BOLD)
@@ -566,7 +569,7 @@ fn render_toggle(
             } else {
                 format!(" ○ {off_text}")
             },
-            theme.muted(),
+            theme.disabled(),
         )
     } else if value {
         (format!(" [ {on_text} ]"), theme.success_bold())
@@ -586,7 +589,9 @@ fn render_cycle_field(
     area: Rect,
     disabled: bool,
 ) {
-    let label_style = if focused {
+    let label_style = if disabled {
+        theme.disabled().add_modifier(Modifier::BOLD)
+    } else if focused {
         theme.text_bold()
     } else {
         theme.muted().add_modifier(Modifier::BOLD)
@@ -599,7 +604,7 @@ fn render_cycle_field(
     let inner = block.inner(area);
     f.render_widget(block, area);
     let style = if disabled {
-        theme.muted()
+        theme.disabled()
     } else if focused {
         theme.accent()
     } else {
@@ -633,7 +638,9 @@ fn render_list_field<T>(
     area: Rect,
     disabled: bool,
 ) {
-    let label_style = if focused {
+    let label_style = if disabled {
+        theme.disabled().add_modifier(Modifier::BOLD)
+    } else if focused {
         theme.text_bold()
     } else {
         theme.muted().add_modifier(Modifier::BOLD)
@@ -668,7 +675,7 @@ fn render_list_field<T>(
         for (row, idx) in (scroll..end).enumerate() {
             let is_sel = focused && edit_mode && idx == selected;
             let style = if disabled {
-                theme.muted()
+                theme.disabled()
             } else if is_sel {
                 theme.selected()
             } else {
@@ -688,7 +695,7 @@ fn render_list_field<T>(
     }
 
     let hint_style = if disabled {
-        theme.muted()
+        theme.disabled()
     } else if focused {
         theme.accent()
     } else {
@@ -1049,8 +1056,9 @@ fn render_dir_picker(f: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Render the "Add Network Rule" popup, exposing the full expressiveness of
-/// the SDK's `RuleBuilder`: direction, action, destination kind/value/
-/// group, protocol filter, and an optional guest-side port or port range.
+/// the SDK's `RuleBuilder`: action, direction, destination kind/value/
+/// group, protocol filter, and an optional comma-separated list of
+/// guest-side ports/ranges to apply the rule to.
 fn render_net_rule_add_dialog(f: &mut Frame, app: &App, area: Rect) {
     let dialog = &app.create_dialog.net_rule_add;
     let theme = &app.theme;
@@ -1058,9 +1066,9 @@ fn render_net_rule_add_dialog(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    // border(2) + direction/action(1) + dest kind(1) + dest value(3) +
-    // protocols(1) + ports(3) + hint(1) = 12
-    let popup = centred_rect(70, 12, area);
+    // border(2) + action/direction(3) + destination(3) + protocols(3) +
+    // apply-to-ports(3) + hint(1) = 15
+    let popup = centred_rect(70, 15, area);
     f.render_widget(Clear, popup);
 
     let block = Block::default()
@@ -1079,102 +1087,177 @@ fn render_net_rule_add_dialog(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // direction / action
-            Constraint::Length(1), // dest kind
-            Constraint::Length(3), // dest value / group
-            Constraint::Length(1), // protocols
-            Constraint::Length(3), // ports
+            Constraint::Length(3), // action / direction
+            Constraint::Length(3), // destination kind + value/group
+            Constraint::Length(3), // protocols
+            Constraint::Length(3), // apply to ports
             Constraint::Length(1), // hint/error
         ])
         .split(inner);
 
     let style_for = |focused: bool| if focused { theme.accent_bold() } else { theme.text() };
 
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("Direction: ", theme.muted()),
-            Span::styled(dialog.direction.label(), style_for(dialog.add_field == 0)),
-            Span::raw("    "),
-            Span::styled("Action: ", theme.muted()),
-            Span::styled(dialog.action.label(), style_for(dialog.add_field == 1)),
-        ])),
-        chunks[0],
-    );
-
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("Destination Kind: ", theme.muted()),
-            Span::styled(dialog.dest_kind.label(), style_for(dialog.add_field == 2)),
-        ])),
-        chunks[1],
-    );
-
-    if dialog.dest_kind == NetRuleDestKind::Group {
+    // Action / Direction — bordered box, Action first.
+    {
+        let focused = dialog.add_field == 0 || dialog.add_field == 1;
+        let label_style = if focused {
+            theme.text_bold()
+        } else {
+            theme.muted().add_modifier(Modifier::BOLD)
+        };
+        let inner_box = Block::default()
+            .title(Span::styled(" Action / Direction ", label_style))
+            .borders(Borders::ALL)
+            .border_type(theme.border_type(focused))
+            .border_style(theme.border_style(focused));
+        let box_inner = inner_box.inner(chunks[0]);
+        f.render_widget(inner_box, chunks[0]);
+        let text_area = Rect::new(box_inner.x, box_inner.y, box_inner.width, box_inner.height.min(1));
         f.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled("Group: ", theme.muted()),
-                Span::styled(dialog.dest_group.label(), style_for(dialog.add_field == 3)),
+                Span::styled(" Action: ", theme.muted()),
+                Span::styled(dialog.action.label(), style_for(dialog.add_field == 0)),
+                Span::raw("    "),
+                Span::styled("Direction: ", theme.muted()),
+                Span::styled(dialog.direction.label(), style_for(dialog.add_field == 1)),
             ])),
-            chunks[2],
-        );
-    } else if dialog.dest_kind == NetRuleDestKind::Any {
-        f.render_widget(
-            Paragraph::new(Span::styled(
-                "(matches any destination)",
-                theme.muted(),
-            )),
-            chunks[2],
-        );
-    } else {
-        render_field(
-            f,
-            theme,
-            "Value",
-            &dialog.dest_input,
-            dialog.add_field == 3,
-            chunks[2],
-            false,
-            false,
+            text_area,
         );
     }
 
-    let proto_spans: Vec<Span> = crate::sandbox::NetRuleProtocol::ALL
-        .iter()
-        .enumerate()
-        .flat_map(|(i, proto)| {
-            let checked = dialog.protocols.contains(proto);
-            let cursor_here = dialog.add_field == 4 && dialog.protocol_cursor == i;
-            let box_style = if cursor_here {
-                theme.accent_bold()
-            } else if checked {
-                theme.text()
-            } else {
-                theme.muted()
-            };
-            let mark = if checked { "[x]" } else { "[ ]" };
-            vec![
-                Span::styled(format!("{mark} {} ", proto.label()), box_style),
-                Span::raw(" "),
-            ]
-        })
-        .collect();
-    f.render_widget(Paragraph::new(Line::from(proto_spans)), chunks[3]);
+    // Destination — kind + value/group in the same bordered box.
+    {
+        let focused = dialog.add_field == 2 || dialog.add_field == 3;
+        let label_style = if focused {
+            theme.text_bold()
+        } else {
+            theme.muted().add_modifier(Modifier::BOLD)
+        };
+        let inner_box = Block::default()
+            .title(Span::styled(" Destination ", label_style))
+            .borders(Borders::ALL)
+            .border_type(theme.border_type(focused))
+            .border_style(theme.border_style(focused));
+        let box_inner = inner_box.inner(chunks[1]);
+        f.render_widget(inner_box, chunks[1]);
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1)])
+            .split(box_inner);
+        let kind_and_value: Vec<Span> = {
+            let mut spans = vec![
+                Span::styled(" Kind: ", theme.muted()),
+                Span::styled(dialog.dest_kind.label(), style_for(dialog.add_field == 2)),
+            ];
+            match dialog.dest_kind {
+                NetRuleDestKind::Group => {
+                    spans.push(Span::raw("    "));
+                    spans.push(Span::styled("Group: ", theme.muted()));
+                    spans.push(Span::styled(
+                        dialog.dest_group.label(),
+                        style_for(dialog.add_field == 3),
+                    ));
+                }
+                NetRuleDestKind::Any => {
+                    spans.push(Span::raw("    "));
+                    spans.push(Span::styled("(matches any destination)", theme.muted()));
+                }
+                _ => {
+                    spans.push(Span::raw("    "));
+                    spans.push(Span::styled("Value: ", theme.muted()));
+                    let display = if dialog.add_field == 3 {
+                        format!("{}▌", dialog.dest_input)
+                    } else {
+                        dialog.dest_input.clone()
+                    };
+                    spans.push(Span::styled(display, style_for(dialog.add_field == 3)));
+                }
+            }
+            spans
+        };
+        f.render_widget(Paragraph::new(Line::from(kind_and_value)), rows[0]);
+    }
 
-    render_field(
-        f,
-        theme,
-        "Ports",
-        &dialog.ports_input,
-        dialog.add_field == 5,
-        chunks[4],
-        false,
-        false,
-    );
+    // Protocols — bordered box.
+    {
+        let focused = dialog.add_field == 4;
+        let label_style = if focused {
+            theme.text_bold()
+        } else {
+            theme.muted().add_modifier(Modifier::BOLD)
+        };
+        let inner_box = Block::default()
+            .title(Span::styled(" Protocols ", label_style))
+            .borders(Borders::ALL)
+            .border_type(theme.border_type(focused))
+            .border_style(theme.border_style(focused));
+        let box_inner = inner_box.inner(chunks[2]);
+        f.render_widget(inner_box, chunks[2]);
+        let text_area = Rect::new(box_inner.x, box_inner.y, box_inner.width, box_inner.height.min(1));
+        let proto_spans: Vec<Span> = crate::sandbox::NetRuleProtocol::ALL
+            .iter()
+            .enumerate()
+            .flat_map(|(i, proto)| {
+                let checked = dialog.protocols.contains(proto);
+                let cursor_here = focused && dialog.protocol_cursor == i;
+                let box_style = if cursor_here {
+                    theme.accent_bold()
+                } else if checked {
+                    theme.text()
+                } else {
+                    theme.muted()
+                };
+                let mark = if checked { "[x]" } else { "[ ]" };
+                vec![
+                    Span::styled(format!(" {mark} {} ", proto.label()), box_style),
+                    Span::raw(" "),
+                ]
+            })
+            .collect();
+        f.render_widget(Paragraph::new(Line::from(proto_spans)), text_area);
+    }
+
+    // Apply to Ports — bordered box with an inline format hint.
+    {
+        let focused = dialog.add_field == 5;
+        let label_style = if focused {
+            theme.text_bold()
+        } else {
+            theme.muted().add_modifier(Modifier::BOLD)
+        };
+        let inner_box = Block::default()
+            .title(Span::styled(" Apply to Ports ", label_style))
+            .borders(Borders::ALL)
+            .border_type(theme.border_type(focused))
+            .border_style(theme.border_style(focused));
+        let box_inner = inner_box.inner(chunks[3]);
+        f.render_widget(inner_box, chunks[3]);
+        let display = if focused {
+            format!(" {}▌", dialog.ports_input)
+        } else if dialog.ports_input.is_empty() {
+            " (any port)".to_owned()
+        } else {
+            format!(" {}", dialog.ports_input)
+        };
+        let value_style = if focused { theme.text() } else { theme.secondary() };
+        let value_area = Rect::new(box_inner.x, box_inner.y, box_inner.width, 1);
+        f.render_widget(Paragraph::new(Span::styled(display, value_style)), value_area);
+        if box_inner.height > 1 {
+            let hint_area = Rect::new(box_inner.x, box_inner.y + 1, box_inner.width, 1);
+            f.render_widget(
+                Paragraph::new(Span::styled(
+                    " e.g. 80,443,8000-9000 (comma-separated ports/ranges)",
+                    theme.muted(),
+                )),
+                hint_area,
+            );
+        }
+    }
 
     if let Some(ref err) = dialog.error {
         f.render_widget(
             Paragraph::new(Span::styled(format!("✗ {err}"), theme.danger())),
-            chunks[5],
+            chunks[4],
         );
     } else {
         f.render_widget(
@@ -1184,7 +1267,7 @@ fn render_net_rule_add_dialog(f: &mut Frame, app: &App, area: Rect) {
                 ("Enter", "next/add"),
                 ("Esc", "cancel"),
             ])),
-            chunks[5],
+            chunks[4],
         );
     }
 }

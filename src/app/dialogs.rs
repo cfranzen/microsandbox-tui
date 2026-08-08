@@ -241,7 +241,7 @@ impl EnvVarAddDialog {
 /// are listed inline in the Network tab; this popup only handles adding a
 /// new one, and exposes the full expressiveness of the SDK's
 /// `RuleBuilder`: direction, action, destination kind/value/group, protocol
-/// filter, and an optional guest-side port or port range.
+/// filter, and an optional comma-separated list of guest-side ports/ranges.
 #[derive(Debug, Clone)]
 pub struct NetRuleAddDialog {
     pub visible: bool,
@@ -256,9 +256,10 @@ pub struct NetRuleAddDialog {
     pub protocols: Vec<NetRuleProtocol>,
     /// Index into [`NetRuleProtocol::ALL`] currently highlighted for toggling.
     pub protocol_cursor: usize,
-    /// Port or port-range input buffer, e.g. `"8080"` or `"1000-2000"`.
+    /// "Apply to ports" input buffer: a comma-separated list of ports
+    /// and/or port ranges, e.g. `"80,443,8000-9000"`.
     pub ports_input: String,
-    /// Focused field: 0 direction, 1 action, 2 dest kind, 3 dest value/group,
+    /// Focused field: 0 action, 1 direction, 2 dest kind, 3 dest value/group,
     /// 4 protocols, 5 ports.
     pub add_field: usize,
     pub error: Option<String>,
@@ -306,9 +307,11 @@ impl NetRuleAddDialog {
             protocols: existing.protocols.clone(),
             protocol_cursor: 0,
             ports_input: existing
-                .port_range
+                .port_ranges
+                .iter()
                 .map(|(lo, hi)| if lo == hi { lo.to_string() } else { format!("{lo}-{hi}") })
-                .unwrap_or_default(),
+                .collect::<Vec<_>>()
+                .join(","),
             add_field: 0,
             error: None,
         }
@@ -574,6 +577,8 @@ impl CreateDialog {
             cpus: "1".into(),
             memory: "512".into(),
             shell: "/bin/sh".into(),
+            default_ingress_action: NetRuleAction::Deny,
+            default_egress_action: NetRuleAction::Deny,
             dns_query_timeout_ms: "5000".into(),
             dns_rebind_protection: true,
             tls_intercepted_ports: "443".into(),

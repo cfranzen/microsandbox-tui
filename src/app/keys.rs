@@ -857,18 +857,39 @@ pub(crate) fn validate_cidr(input: &str) -> Result<(), &'static str> {
 }
 
 /// Parse a single port (`"8080"`) or port range (`"1000-2000"`) string.
-fn parse_port_range(input: &str) -> Result<(u16, u16), &'static str> {
+fn parse_port_range(input: &str) -> Result<(u16, u16), String> {
     if let Some((lo, hi)) = input.split_once('-') {
-        let lo: u16 = lo.trim().parse().map_err(|_| "Invalid port range")?;
-        let hi: u16 = hi.trim().parse().map_err(|_| "Invalid port range")?;
+        let lo: u16 = lo
+            .trim()
+            .parse()
+            .map_err(|_| format!("Invalid port range '{input}'"))?;
+        let hi: u16 = hi
+            .trim()
+            .parse()
+            .map_err(|_| format!("Invalid port range '{input}'"))?;
         if lo > hi {
-            return Err("Range start must be <= end");
+            return Err(format!("Range start must be <= end in '{input}'"));
         }
         Ok((lo, hi))
     } else {
-        let p: u16 = input.trim().parse().map_err(|_| "Invalid port")?;
+        let p: u16 = input
+            .trim()
+            .parse()
+            .map_err(|_| format!("Invalid port '{input}'"))?;
         Ok((p, p))
     }
+}
+
+/// Parse the "apply to ports" field: a comma-separated list of ports and/or
+/// port ranges, e.g. `"80,443,8000-9000"`. An empty/blank input means "any
+/// port" (an empty result).
+fn parse_port_ranges_csv(input: &str) -> Result<Vec<(u16, u16)>, String> {
+    input
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(parse_port_range)
+        .collect()
 }
 
 fn handle_net_rule_add_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
@@ -886,12 +907,12 @@ fn handle_net_rule_add_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
         }
         KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if field == 0 => {
             let dlg = &mut app.create_dialog.net_rule_add;
-            dlg.direction = dlg.direction.cycle();
+            dlg.action = dlg.action.cycle();
             dlg.error = None;
         }
         KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if field == 1 => {
             let dlg = &mut app.create_dialog.net_rule_add;
-            dlg.action = dlg.action.cycle();
+            dlg.direction = dlg.direction.cycle();
             dlg.error = None;
         }
         KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if field == 2 => {
@@ -942,7 +963,7 @@ fn handle_net_rule_add_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
             app.create_dialog.net_rule_add.ports_input.pop();
             app.create_dialog.net_rule_add.error = None;
         }
-        KeyCode::Char(c) if field == 5 && (c.is_ascii_digit() || c == '-') => {
+        KeyCode::Char(c) if field == 5 && (c.is_ascii_digit() || c == '-' || c == ',') => {
             app.create_dialog.net_rule_add.ports_input.push(c);
             app.create_dialog.net_rule_add.error = None;
         }
@@ -997,15 +1018,11 @@ fn submit_net_rule(app: &mut App) {
         }
     }
 
-    let port_range = if dlg.ports_input.trim().is_empty() {
-        None
-    } else {
-        match parse_port_range(dlg.ports_input.trim()) {
-            Ok(pr) => Some(pr),
-            Err(e) => {
-                app.create_dialog.net_rule_add.error = Some(e.to_owned());
-                return;
-            }
+    let port_ranges = match parse_port_ranges_csv(dlg.ports_input.trim()) {
+        Ok(prs) => prs,
+        Err(e) => {
+            app.create_dialog.net_rule_add.error = Some(e);
+            return;
         }
     };
 
@@ -1016,7 +1033,7 @@ fn submit_net_rule(app: &mut App) {
         dest_value,
         dest_group: dlg.dest_group,
         protocols: dlg.protocols,
-        port_range,
+        port_ranges,
     };
     if let Some(index) = dlg.editing_index {
         app.create_dialog.network_rules[index] = rule;

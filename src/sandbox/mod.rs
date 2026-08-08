@@ -290,8 +290,10 @@ pub struct NetworkRule {
     pub dest_group: NetRuleDestGroup,
     /// Protocol filter; empty means "any protocol".
     pub protocols: Vec<NetRuleProtocol>,
-    /// Guest-side port or port range filter; `None` means "any port".
-    pub port_range: Option<(u16, u16)>,
+    /// Guest-side ports/port-ranges filter; empty means "any port". Each
+    /// entry is an inclusive `(lo, hi)` range (`lo == hi` for a single
+    /// port).
+    pub port_ranges: Vec<(u16, u16)>,
 }
 
 impl NetworkRule {
@@ -312,10 +314,16 @@ impl NetworkRule {
                 .collect::<Vec<_>>()
                 .join("+")
         };
-        let ports = match self.port_range {
-            None => "any port".to_owned(),
-            Some((lo, hi)) if lo == hi => format!("port {lo}"),
-            Some((lo, hi)) => format!("ports {lo}-{hi}"),
+        let ports = if self.port_ranges.is_empty() {
+            "any port".to_owned()
+        } else {
+            let list = self
+                .port_ranges
+                .iter()
+                .map(|(lo, hi)| if lo == hi { lo.to_string() } else { format!("{lo}-{hi}") })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("ports {list}")
         };
         format!(
             "{} {} {} [{proto}, {ports}]",
@@ -746,11 +754,11 @@ fn build_network_policy(cfg: &CreateConfig) -> Result<NetworkPolicy> {
                     }
                 }
             }
-            if let Some((lo, hi)) = rule.port_range {
+            for (lo, hi) in &rule.port_ranges {
                 if lo == hi {
-                    r.port(lo);
+                    r.port(*lo);
                 } else {
-                    r.port_range(lo, hi);
+                    r.port_range(*lo, *hi);
                 }
             }
             let dest = match rule.action {
@@ -1320,7 +1328,7 @@ mod tests {
             dest_value: cidr.to_owned(),
             dest_group: NetRuleDestGroup::default(),
             protocols: Vec::new(),
-            port_range: None,
+            port_ranges: Vec::new(),
         }
     }
 
@@ -1436,7 +1444,7 @@ mod tests {
             dest_value: String::new(),
             dest_group: NetRuleDestGroup::Public,
             protocols: vec![NetRuleProtocol::Tcp],
-            port_range: Some((443, 443)),
+            port_ranges: vec![(443, 443)],
         }];
         let policy = build_network_policy(&CreateConfig {
             name: "x".into(), image: "alpine".into(), cpus: 1, memory_mib: 512, ports: vec![],
@@ -1461,7 +1469,7 @@ mod tests {
             dest_value: String::new(),
             dest_group: NetRuleDestGroup::default(),
             protocols: vec![NetRuleProtocol::Icmpv4],
-            port_range: None,
+            port_ranges: Vec::new(),
         }];
         let cfg = CreateConfig {
             name: "x".into(), image: "alpine".into(), cpus: 1, memory_mib: 512, ports: vec![],
