@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0](https://github.com/cfranzen/microsandbox-tui/compare/v0.3.0...v0.4.0) (2026-08-08)
+
+
+### Added
+
+* allow starting a shell easier ([5b0e8fe](https://github.com/cfranzen/microsandbox-tui/commit/5b0e8fec5dd65355d62463f546de91d98371ca98))
+* change default exec command to empty ([f6b5dbe](https://github.com/cfranzen/microsandbox-tui/commit/f6b5dbef983d0a27883cabd0245be9d6738325d0))
+* improve mount add dialog flow ([bb80b11](https://github.com/cfranzen/microsandbox-tui/commit/bb80b11ff00b4ac3113d5d6aa71d8f7ffc793c65))
+* natively implement exec session to remove dependency on msb app ([bcaeb01](https://github.com/cfranzen/microsandbox-tui/commit/bcaeb01d556aad064708f3eb635cfc3e312f5187))
+* redesigned metrics view ([c5e52ba](https://github.com/cfranzen/microsandbox-tui/commit/c5e52ba553270548413e182bb84a3853407592fd))
+* reorganize network and dns dialog tabs ([a18d01b](https://github.com/cfranzen/microsandbox-tui/commit/a18d01b183459c7a70e9e039ca9ecd2213b12428))
+* restructured details tabs. added explicit metrics view ([d92166f](https://github.com/cfranzen/microsandbox-tui/commit/d92166f7216fe7c95062a89db3747f9e028a9726))
+* show working dir as host path ([4107e0d](https://github.com/cfranzen/microsandbox-tui/commit/4107e0d50eae24484a099646ad1a655c0696cd4d))
+* unify the appearance of tabs ([f0166b3](https://github.com/cfranzen/microsandbox-tui/commit/f0166b3da1f02c74d87bcf4f51a1aabeeabde86f))
+
+
+### Fixed
+
+* correct Network tab field-index off-by-one (Ports/Egress collision) ([0563641](https://github.com/cfranzen/microsandbox-tui/commit/0563641df25effb5794023e4bd5a702809241cbc))
+* prevent Kitty-protocol Esc key-release from closing an extra dialog level ([812a8be](https://github.com/cfranzen/microsandbox-tui/commit/812a8be9cbd545399a8f0c2be18bc10f7b4bd557))
+* show list hints only on focus ([8ce00ae](https://github.com/cfranzen/microsandbox-tui/commit/8ce00ae81933ec5084701da302b1a1a2c9b69c2b))
+* up / down arrows are not working in sandbox shell ([c6b07ee](https://github.com/cfranzen/microsandbox-tui/commit/c6b07ee8d3eb60ddfe40890414f06eea47d185cd))
+
 ## [0.3.0](https://github.com/cfranzen/microsandbox-tui/compare/v0.2.0...v0.3.0) (2026-08-07)
 
 
