@@ -168,6 +168,7 @@ pub enum SubDialogMode {
 #[derive(Debug, Clone, Default)]
 pub struct PortAddDialog {
     pub visible: bool,
+    pub editing_index: Option<usize>,
     /// Host-port input buffer.
     pub host_input: String,
     /// Guest-port input buffer.
@@ -184,6 +185,17 @@ impl PortAddDialog {
             ..Default::default()
         }
     }
+
+    pub fn open_for_edit(index: usize, existing: (u16, u16)) -> Self {
+        Self {
+            visible: true,
+            editing_index: Some(index),
+            host_input: existing.0.to_string(),
+            guest_input: existing.1.to_string(),
+            add_field: 0,
+            error: None,
+        }
+    }
 }
 
 /// Popup dialog for adding one environment variable (KEY=VALUE). Entries
@@ -192,6 +204,7 @@ impl PortAddDialog {
 #[derive(Debug, Clone, Default)]
 pub struct EnvVarAddDialog {
     pub visible: bool,
+    pub editing_index: Option<usize>,
     /// Key input buffer.
     pub key_input: String,
     /// Value input buffer.
@@ -208,6 +221,17 @@ impl EnvVarAddDialog {
             ..Default::default()
         }
     }
+
+    pub fn open_for_edit(index: usize, existing: &(String, String)) -> Self {
+        Self {
+            visible: true,
+            editing_index: Some(index),
+            key_input: existing.0.clone(),
+            value_input: existing.1.clone(),
+            add_field: 0,
+            error: None,
+        }
+    }
 }
 
 /// Popup dialog for adding one network policy rule. Entries already added
@@ -218,6 +242,7 @@ impl EnvVarAddDialog {
 #[derive(Debug, Clone)]
 pub struct NetRuleAddDialog {
     pub visible: bool,
+    pub editing_index: Option<usize>,
     pub direction: NetRuleDirection,
     pub action: NetRuleAction,
     pub dest_kind: NetRuleDestKind,
@@ -240,6 +265,7 @@ impl Default for NetRuleAddDialog {
     fn default() -> Self {
         Self {
             visible: false,
+            editing_index: None,
             direction: NetRuleDirection::default(),
             action: NetRuleAction::default(),
             dest_kind: NetRuleDestKind::default(),
@@ -264,6 +290,26 @@ impl NetRuleAddDialog {
             ..Default::default()
         }
     }
+
+    pub fn open_for_edit(index: usize, existing: &NetworkRule) -> Self {
+        Self {
+            visible: true,
+            editing_index: Some(index),
+            direction: existing.direction,
+            action: existing.action,
+            dest_kind: existing.dest_kind,
+            dest_input: existing.dest_value.clone(),
+            dest_group: existing.dest_group,
+            protocols: existing.protocols.clone(),
+            protocol_cursor: 0,
+            ports_input: existing
+                .port_range
+                .map(|(lo, hi)| if lo == hi { lo.to_string() } else { format!("{lo}-{hi}") })
+                .unwrap_or_default(),
+            add_field: 0,
+            error: None,
+        }
+    }
 }
 
 /// Which source kind is focused while adding a mount entry.
@@ -280,6 +326,7 @@ pub enum MountKindChoice {
 #[derive(Debug, Clone, Default)]
 pub struct MountAddDialog {
     pub visible: bool,
+    pub editing_index: Option<usize>,
     /// Guest path input buffer.
     pub guest_input: String,
     /// Host path (Bind) or volume name (Named) input buffer.
@@ -298,6 +345,22 @@ impl MountAddDialog {
             ..Default::default()
         }
     }
+
+    pub fn open_for_edit(index: usize, existing: &VolumeMountConfig) -> Self {
+        let (kind, source_input) = match &existing.source {
+            crate::sandbox::MountSource::Bind(path) => (MountKindChoice::Bind, path.clone()),
+            crate::sandbox::MountSource::Named(name) => (MountKindChoice::Named, name.clone()),
+        };
+        Self {
+            visible: true,
+            editing_index: Some(index),
+            guest_input: existing.guest_path.clone(),
+            source_input,
+            kind,
+            add_field: 0,
+            error: None,
+        }
+    }
 }
 
 /// Popup dialog for adding one secret. Entries already added are listed
@@ -310,6 +373,7 @@ impl MountAddDialog {
 #[derive(Debug, Clone)]
 pub struct SecretAddDialog {
     pub visible: bool,
+    pub editing_index: Option<usize>,
     pub env_input: String,
     /// Real secret value. Rendered masked (`******`) in the UI.
     pub value_input: String,
@@ -330,6 +394,7 @@ impl Default for SecretAddDialog {
     fn default() -> Self {
         Self {
             visible: false,
+            editing_index: None,
             env_input: String::new(),
             value_input: String::new(),
             hosts_input: String::new(),
@@ -354,6 +419,32 @@ impl SecretAddDialog {
             ..Default::default()
         }
     }
+
+    pub fn open_for_edit(index: usize, existing: &SecretConfig) -> Self {
+        let hosts_input = existing
+            .allowed_hosts
+            .iter()
+            .map(|host| match host.kind {
+                crate::sandbox::SecretHostKind::Any => "*".to_owned(),
+                _ => host.value.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        Self {
+            visible: true,
+            editing_index: Some(index),
+            env_input: existing.env_var.clone(),
+            value_input: existing.value.clone(),
+            hosts_input,
+            inject_headers: existing.inject_headers,
+            inject_basic_auth: existing.inject_basic_auth,
+            inject_query: existing.inject_query,
+            inject_body: existing.inject_body,
+            require_tls_identity: existing.require_tls_identity,
+            add_field: 0,
+            error: None,
+        }
+    }
 }
 
 /// Identifies which inline list is currently focused within a
@@ -374,6 +465,7 @@ pub struct CreateDialog {
     pub visible: bool,
     pub tab: DialogTab,
     pub field: usize,
+    pub list_edit_mode: bool,
 
     // ── Basic tab (fields 0-6) ───────────────────────────────────────────
     pub name: String,
@@ -491,6 +583,7 @@ impl CreateDialog {
 
     pub fn next_field(&mut self) {
         self.field = (self.field + 1) % self.field_count();
+        self.list_edit_mode = false;
     }
 
     pub fn prev_field(&mut self) {
@@ -500,11 +593,13 @@ impl CreateDialog {
         } else {
             self.field - 1
         };
+        self.list_edit_mode = false;
     }
 
     pub fn switch_tab(&mut self, tab: DialogTab) {
         self.tab = tab;
         self.field = 0;
+        self.list_edit_mode = false;
         self.error = None;
     }
 

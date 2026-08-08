@@ -639,6 +639,39 @@ fn test_esc_closes_dialog() {
 }
 
 #[test]
+fn test_esc_closes_only_dir_picker() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    app.create_dialog.dir_picker = DirPicker::open("/");
+    handle_event(&mut app, key_press(KeyCode::Esc));
+    assert!(app.create_dialog.visible);
+    assert!(!app.create_dialog.dir_picker.visible);
+}
+
+#[test]
+fn test_esc_closes_only_port_add_dialog() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    app.create_dialog.port_add = PortAddDialog::open();
+    handle_event(&mut app, key_press(KeyCode::Esc));
+    assert!(app.create_dialog.visible);
+    assert!(!app.create_dialog.port_add.visible);
+}
+
+#[test]
+fn test_esc_exits_list_edit_mode_only() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    app.create_dialog.switch_tab(DialogTab::Network);
+    app.create_dialog.field = 1;
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    assert!(app.create_dialog.list_edit_mode);
+    handle_event(&mut app, key_press(KeyCode::Esc));
+    assert!(app.create_dialog.visible);
+    assert!(!app.create_dialog.list_edit_mode);
+}
+
+#[test]
 fn test_esc_does_not_quit() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();
@@ -768,6 +801,7 @@ fn test_dialog_port_add_dialog_add_entry() {
     app.create_dialog.switch_tab(DialogTab::Network);
     app.create_dialog.field = 1; // ports list
     handle_event(&mut app, key_press(KeyCode::Enter));
+    handle_event(&mut app, key_press(KeyCode::Char('a')));
     assert!(app.create_dialog.port_add.visible);
     for ch in "8080".chars() {
         handle_event(&mut app, key_press(KeyCode::Char(ch)));
@@ -788,6 +822,7 @@ fn test_dialog_port_list_delete_entry() {
     app.create_dialog.switch_tab(DialogTab::Network);
     app.create_dialog.ports = vec![(8080, 80)];
     app.create_dialog.field = 1;
+    handle_event(&mut app, key_press(KeyCode::Enter));
     handle_event(&mut app, key_press(KeyCode::Char('d')));
     assert!(app.create_dialog.ports.is_empty());
 }
@@ -799,6 +834,7 @@ fn test_dialog_env_var_add_dialog_add_entry() {
     app.create_dialog.switch_tab(DialogTab::GuestOs);
     app.create_dialog.field = 3; // env vars list
     handle_event(&mut app, key_press(KeyCode::Enter));
+    handle_event(&mut app, key_press(KeyCode::Char('a')));
     assert!(app.create_dialog.env_var_add.visible);
     for ch in "FOO".chars() {
         handle_event(&mut app, key_press(KeyCode::Char(ch)));
@@ -843,6 +879,7 @@ fn test_dialog_net_rule_add_dialog_add_entry() {
     app.create_dialog.switch_tab(DialogTab::Network);
     app.create_dialog.field = 2; // network rules list
     handle_event(&mut app, key_press(KeyCode::Enter));
+    handle_event(&mut app, key_press(KeyCode::Char('a')));
     assert!(app.create_dialog.net_rule_add.visible);
 
     // Direction: Egress -> Ingress.
@@ -895,6 +932,7 @@ fn test_dialog_net_rule_invalid_cidr_shows_error() {
     app.create_dialog.switch_tab(DialogTab::Network);
     app.create_dialog.field = 2;
     handle_event(&mut app, key_press(KeyCode::Enter));
+    handle_event(&mut app, key_press(KeyCode::Char('a')));
     handle_event(&mut app, key_press(KeyCode::Tab)); // action
     handle_event(&mut app, key_press(KeyCode::Tab)); // dest kind
     handle_event(&mut app, key_press(KeyCode::Right)); // Any -> Ip
@@ -925,6 +963,7 @@ fn test_dialog_network_rules_delete_entry() {
         port_range: None,
     }];
     app.create_dialog.field = 2; // network rules list
+    handle_event(&mut app, key_press(KeyCode::Enter));
     handle_event(&mut app, key_press(KeyCode::Char('d')));
     assert!(app.create_dialog.network_rules.is_empty());
 }
@@ -950,6 +989,7 @@ fn test_dialog_mount_add_dialog_add_bind_entry() {
     app.create_dialog.switch_tab(DialogTab::GuestOs);
     app.create_dialog.field = 4; // mounts list
     handle_event(&mut app, key_press(KeyCode::Enter));
+    handle_event(&mut app, key_press(KeyCode::Char('a')));
     assert!(app.create_dialog.mount_add.visible);
     for ch in "/data".chars() {
         handle_event(&mut app, key_press(KeyCode::Char(ch)));
@@ -1002,6 +1042,7 @@ fn test_dialog_mounts_delete_entry() {
         source: MountSource::Bind("/host".into()),
     }];
     app.create_dialog.field = 4;
+    handle_event(&mut app, key_press(KeyCode::Enter));
     handle_event(&mut app, key_press(KeyCode::Char('d')));
     assert!(app.create_dialog.mounts.is_empty());
 }
@@ -1013,6 +1054,7 @@ fn test_dialog_secret_add_dialog_add_entry() {
     app.create_dialog.switch_tab(DialogTab::Secrets);
     app.create_dialog.field = 0; // secrets list
     handle_event(&mut app, key_press(KeyCode::Enter));
+    handle_event(&mut app, key_press(KeyCode::Char('a')));
     assert!(app.create_dialog.secret_add.visible);
     for ch in "OPENAI_API_KEY".chars() {
         handle_event(&mut app, key_press(KeyCode::Char(ch)));
@@ -1076,8 +1118,137 @@ fn test_dialog_secrets_delete_entry() {
         require_tls_identity: true,
     }];
     app.create_dialog.field = 0;
+    handle_event(&mut app, key_press(KeyCode::Enter));
     handle_event(&mut app, key_press(KeyCode::Char('d')));
     assert!(app.create_dialog.secrets.is_empty());
+}
+
+#[test]
+fn test_enter_on_list_opens_edit_dialog_prefilled() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    app.create_dialog.switch_tab(DialogTab::Network);
+    app.create_dialog.ports = vec![(8080, 80)];
+    app.create_dialog.field = 1;
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    assert!(app.create_dialog.port_add.visible);
+    assert_eq!(app.create_dialog.port_add.editing_index, Some(0));
+    assert_eq!(app.create_dialog.port_add.host_input, "8080");
+    assert_eq!(app.create_dialog.port_add.guest_input, "80");
+}
+
+#[test]
+fn test_edit_port_replaces_entry() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    app.create_dialog.ports = vec![(8080, 80)];
+    app.create_dialog.port_add = PortAddDialog::open_for_edit(0, (8080, 80));
+    app.create_dialog.port_add.host_input.clear();
+    for ch in "9090".chars() {
+        handle_event(&mut app, key_press(KeyCode::Char(ch)));
+    }
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    assert_eq!(app.create_dialog.ports, vec![(9090, 80)]);
+}
+
+#[test]
+fn test_edit_env_var_replaces_entry() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    app.create_dialog.env_vars = vec![("FOO".into(), "bar".into())];
+    app.create_dialog.env_var_add =
+        EnvVarAddDialog::open_for_edit(0, &("FOO".into(), "bar".into()));
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    app.create_dialog.env_var_add.value_input.clear();
+    for ch in "baz".chars() {
+        handle_event(&mut app, key_press(KeyCode::Char(ch)));
+    }
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    assert_eq!(app.create_dialog.env_vars, vec![("FOO".into(), "baz".into())]);
+}
+
+#[test]
+fn test_edit_mount_replaces_entry() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    let mount = VolumeMountConfig {
+        guest_path: "/data".into(),
+        source: MountSource::Bind("/host".into()),
+    };
+    app.create_dialog.mounts = vec![mount.clone()];
+    app.create_dialog.mount_add = MountAddDialog::open_for_edit(0, &mount);
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    app.create_dialog.mount_add.source_input.clear();
+    for ch in "/other".chars() {
+        handle_event(&mut app, key_press(KeyCode::Char(ch)));
+    }
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    assert_eq!(
+        app.create_dialog.mounts[0].source,
+        MountSource::Bind("/other".into())
+    );
+}
+
+#[test]
+fn test_edit_net_rule_replaces_entry() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    let rule = NetworkRule {
+        direction: NetRuleDirection::Egress,
+        action: NetRuleAction::Allow,
+        dest_kind: NetRuleDestKind::Domain,
+        dest_value: "a.com".into(),
+        dest_group: NetRuleDestGroup::Public,
+        protocols: vec![],
+        port_range: None,
+    };
+    app.create_dialog.network_rules = vec![rule.clone()];
+    app.create_dialog.net_rule_add = NetRuleAddDialog::open_for_edit(0, &rule);
+    handle_event(&mut app, key_press(KeyCode::Tab));
+    handle_event(&mut app, key_press(KeyCode::Tab));
+    handle_event(&mut app, key_press(KeyCode::Tab));
+    for _ in 0..5 {
+        handle_event(&mut app, key_press(KeyCode::Backspace));
+    }
+    for ch in "b.com".chars() {
+        handle_event(&mut app, key_press(KeyCode::Char(ch)));
+    }
+    handle_event(&mut app, key_press(KeyCode::Tab));
+    handle_event(&mut app, key_press(KeyCode::Tab));
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    assert_eq!(app.create_dialog.network_rules[0].dest_value, "b.com");
+}
+
+#[test]
+fn test_edit_secret_replaces_entry() {
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    let secret = SecretConfig {
+        env_var: "TOKEN".into(),
+        value: "abc".into(),
+        allowed_hosts: vec![SecretHostPattern {
+            kind: SecretHostKind::Exact,
+            value: "example.com".into(),
+        }],
+        inject_headers: true,
+        inject_basic_auth: true,
+        inject_query: false,
+        inject_body: false,
+        require_tls_identity: true,
+    };
+    app.create_dialog.secrets = vec![secret.clone()];
+    app.create_dialog.secret_add = SecretAddDialog::open_for_edit(0, &secret);
+    handle_event(&mut app, key_press(KeyCode::Enter));
+    app.create_dialog.secret_add.value_input.clear();
+    for ch in "xyz".chars() {
+        handle_event(&mut app, key_press(KeyCode::Char(ch)));
+    }
+    for _ in 0..7 {
+        handle_event(&mut app, key_press(KeyCode::Enter));
+    }
+    assert_eq!(app.create_dialog.secrets[0].value, "xyz");
 }
 
 #[tokio::test]
