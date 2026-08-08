@@ -176,6 +176,12 @@ pub struct App {
     pub config: AppConfig,
     /// Screen regions from the most recent render, for mouse hit-testing.
     pub mouse: MouseRegions,
+    /// Set when an Esc key-press has just been handled, so the paired
+    /// key-release event some terminals emit for Esc (notably those using
+    /// the Kitty keyboard protocol) is swallowed instead of being treated
+    /// as a second, independent Esc that would close another level of the
+    /// dialog stack.
+    pub esc_press_handled: bool,
     /// Active color/style palette. Every view reads colors and border
     /// styles from this instead of hardcoding them, so toggling it
     /// re-skins the whole app.
@@ -214,6 +220,7 @@ impl App {
             log_stream_name: None,
             config: AppConfig::load(),
             mouse: MouseRegions::default(),
+            esc_press_handled: false,
             theme: Theme::default(),
         }
     }

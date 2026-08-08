@@ -659,6 +659,22 @@ fn test_esc_closes_only_port_add_dialog() {
 }
 
 #[test]
+fn test_esc_press_and_release_pair_closes_only_port_add_dialog() {
+    // Regression test: terminals using the Kitty keyboard protocol emit
+    // BOTH a press and a release event for every keystroke, including Esc.
+    // The press must close only the sub-dialog; the paired release must be
+    // swallowed rather than treated as a second Esc that closes the parent
+    // create dialog too.
+    let mut app = make_app();
+    app.create_dialog = CreateDialog::open();
+    app.create_dialog.port_add = PortAddDialog::open();
+    handle_event(&mut app, key_press(KeyCode::Esc));
+    handle_event(&mut app, key_release(KeyCode::Esc));
+    assert!(app.create_dialog.visible, "create dialog must stay open");
+    assert!(!app.create_dialog.port_add.visible);
+}
+
+#[test]
 fn test_esc_exits_list_edit_mode_only() {
     let mut app = make_app();
     app.create_dialog = CreateDialog::open();

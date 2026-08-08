@@ -70,10 +70,22 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
     // Only act on key presses or repeats; ignore all release events, except
     // for Esc — some terminals (notably on Windows) only emit a release
     // event for the Esc key, so treating it like every other release would
-    // make Esc silently do nothing on those terminals.
-    // This ensures every physical keypress is handled exactly once,
-    // regardless of how many events the terminal emits per keystroke.
-    if key.kind == KeyEventKind::Release && key.code != KeyCode::Esc {
+    // make Esc silently do nothing on those terminals. Other terminals
+    // (notably those using the Kitty keyboard protocol) emit BOTH a press
+    // and a release event for every key, including Esc. To still handle
+    // each physical Esc keypress exactly once, we track whether the press
+    // was already acted on and swallow the paired release; if no press was
+    // seen (the Windows-only-release case) the release itself is handled.
+    if key.code == KeyCode::Esc {
+        if key.kind == KeyEventKind::Release {
+            if app.esc_press_handled {
+                app.esc_press_handled = false;
+                return;
+            }
+        } else {
+            app.esc_press_handled = true;
+        }
+    } else if key.kind == KeyEventKind::Release {
         return;
     }
 
