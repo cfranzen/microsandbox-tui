@@ -16,9 +16,9 @@ use crate::sandbox::{
 };
 
 use super::actions::{
-    action_exec, action_remove, action_terminate, action_toggle_start_stop, handle_confirm_key,
-    handle_search_key, nav_fs_up, on_sandbox_selected, on_tab_switched, request_volume_refresh,
-    scroll_down, scroll_up, submit_create_dialog, PendingAction,
+    action_exec, action_remove, action_shell, action_terminate, action_toggle_start_stop,
+    handle_confirm_key, handle_search_key, nav_fs_up, on_sandbox_selected, on_tab_switched,
+    request_volume_refresh, scroll_down, scroll_up, submit_create_dialog, PendingAction,
 };
 use super::dialogs::{
     CreateDialog, DialogTab, DirPicker, EnvVarsDialog, ExecDialog, MountKindChoice, MountsDialog,
@@ -144,6 +144,9 @@ pub(crate) fn handle_event(app: &mut App, event: Event) {
         }
         KeyCode::Char('e') if app.focus == Focus::SandboxList => {
             action_exec(app);
+        }
+        KeyCode::Char('h') if app.focus == Focus::SandboxList => {
+            action_shell(app);
         }
         KeyCode::Char('d') if app.focus == Focus::SandboxList => {
             action_remove(app);

@@ -43,3 +43,28 @@ pub async fn run(sandbox_name: &str, command: &str) -> Result<i32> {
 
     Ok(exit_code)
 }
+
+/// Connect to `sandbox_name` and attach an interactive session to its
+/// configured shell (the one set via `--shell` at creation time, defaulting
+/// to `/bin/sh`), using the SDK's [`Sandbox::attach_shell`] — the same
+/// purpose-built interactive `attach` path `run` above uses for arbitrary
+/// commands, just without wrapping anything in `sh -c`.
+///
+/// Returns the guest shell's exit code, which the caller should use as this
+/// process's own exit code so the host terminal reflects success or failure
+/// the same way `msb exec` did.
+pub async fn run_shell(sandbox_name: &str) -> Result<i32> {
+    let sandbox = Sandbox::get(sandbox_name)
+        .await
+        .with_context(|| format!("look up sandbox '{sandbox_name}'"))?
+        .connect()
+        .await
+        .with_context(|| format!("connect to sandbox '{sandbox_name}'"))?;
+
+    let exit_code = sandbox
+        .attach_shell()
+        .await
+        .context("attach shell session")?;
+
+    Ok(exit_code)
+}

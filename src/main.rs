@@ -12,19 +12,26 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use microsandbox_tui::terminal_launcher::EXEC_TERMINAL_FLAG;
+use microsandbox_tui::terminal_launcher::{EXEC_TERMINAL_FLAG, SHELL_TERMINAL_FLAG};
 use microsandbox_tui::{app, exec_session};
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 #[tokio::main]
 async fn main() -> Result<ExitCode> {
-    // Hidden mode: when launched by `terminal_launcher::open_exec_terminal`
-    // in a fresh terminal window, connect to a sandbox and forward this
-    // process's stdio to it instead of starting the TUI.
+    // Hidden modes: when launched by `terminal_launcher::open_exec_terminal`
+    // or `open_shell_terminal` in a fresh terminal window, connect to a
+    // sandbox and forward this process's stdio to it instead of starting
+    // the TUI.
     let args: Vec<String> = std::env::args().collect();
     if let [_, flag, sandbox_name, command] = args.as_slice() {
         if flag == EXEC_TERMINAL_FLAG {
             let code = exec_session::run(sandbox_name, command).await?;
+            return Ok(ExitCode::from(code.clamp(0, 255) as u8));
+        }
+    }
+    if let [_, flag, sandbox_name] = args.as_slice() {
+        if flag == SHELL_TERMINAL_FLAG {
+            let code = exec_session::run_shell(sandbox_name).await?;
             return Ok(ExitCode::from(code.clamp(0, 255) as u8));
         }
     }

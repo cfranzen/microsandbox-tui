@@ -624,7 +624,10 @@ mod tests {
     #[test]
     fn test_resolve_workdir_host_path_no_matching_mount_falls_back_to_guest() {
         let mounts = vec![bind_mount("/home/user/project", "/other")];
-        assert_eq!(resolve_workdir_host_path("/workspace", &mounts), "/workspace");
+        assert_eq!(
+            resolve_workdir_host_path("/workspace", &mounts),
+            "/workspace"
+        );
     }
 
     #[test]

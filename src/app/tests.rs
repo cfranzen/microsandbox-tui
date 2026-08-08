@@ -1336,6 +1336,26 @@ async fn test_exec_dialog_enter_with_command_closes_dialog() {
     assert!(app.notification.is_some());
 }
 
+#[tokio::test]
+async fn test_h_shell_opens_terminal_when_running() {
+    let mut app = make_app();
+    app.sandboxes.push(make_sandbox("box1", Status::Running));
+    handle_event(&mut app, key_press(KeyCode::Char('h')));
+    // No dialog is involved — it launches directly. Whether opening a real
+    // terminal succeeds depends on the host environment, but some
+    // notification must always be surfaced either way.
+    assert!(!app.exec_dialog.visible);
+    assert!(app.notification.is_some());
+}
+
+#[tokio::test]
+async fn test_h_shell_error_when_sandbox_not_running() {
+    let mut app = make_app();
+    app.sandboxes.push(make_sandbox("box1", Status::Stopped));
+    handle_event(&mut app, key_press(KeyCode::Char('h')));
+    assert!(app.notification.as_ref().unwrap().is_error);
+}
+
 // ── handle_event: search/filter ──────────────────────────────────────────
 
 #[test]

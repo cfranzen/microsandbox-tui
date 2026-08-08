@@ -387,6 +387,23 @@ pub(crate) fn action_exec(app: &mut App) {
     }
 }
 
+/// Open a new host terminal attached directly to the selected sandbox's
+/// configured shell, if it's running. Unlike [`action_exec`], this needs no
+/// dialog — there's no command to type, since it just opens the shell that
+/// was configured (or defaulted) when the sandbox was created.
+pub(crate) fn action_shell(app: &mut App) {
+    if let Some(sb) = app.selected_sandbox().cloned() {
+        if sb.status == Status::Running {
+            match crate::terminal_launcher::open_shell_terminal(&sb.name) {
+                Ok(()) => app.notify(format!("Opening shell in '{}'…", sb.name), false),
+                Err(e) => app.notify(format!("Failed to open terminal: {e}"), true),
+            }
+        } else {
+            app.notify("Sandbox is not running", true);
+        }
+    }
+}
+
 /// Handle a keypress while the "Are you sure?" confirmation dialog is open.
 pub(crate) fn handle_confirm_key(app: &mut App, code: KeyCode) {
     match code {

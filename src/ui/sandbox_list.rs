@@ -354,25 +354,31 @@ fn render_new_sandbox_card(
 //--------------------------------------------------------------------------------------------------
 
 /// The action shortcuts available for a sandbox in a given status, each
-/// with its own semantic color: start = success, stop = warning, exec =
-/// info, terminate/delete = danger.
-fn action_items(theme: &Theme, status: SandboxStatus) -> Vec<(&'static str, &'static str, Color)> {
+/// with its own semantic color: start = success, stop = warning, exec/shell
+/// = info, terminate/delete = danger. `key` is the shortcut character and
+/// `label` is the full action name in which it appears (not necessarily as
+/// the first letter, e.g. "shell" for the `h` shortcut).
+fn action_items(theme: &Theme, status: SandboxStatus) -> Vec<(char, &'static str, Color)> {
     match status {
         SandboxStatus::Running => vec![
-            ("s", "top", theme.warning),
-            ("e", "xec", theme.info),
-            ("t", "erm", theme.danger),
-            ("d", "el", theme.danger),
+            ('s', "stop", theme.warning),
+            ('e', "exec", theme.info),
+            ('h', "shell", theme.info),
+            ('t', "term", theme.danger),
+            ('d', "del", theme.danger),
         ],
-        SandboxStatus::Stopped => vec![("s", "tart", theme.success), ("d", "el", theme.danger)],
-        _ => vec![("d", "el", theme.danger)],
+        SandboxStatus::Stopped => vec![('s', "start", theme.success), ('d', "del", theme.danger)],
+        _ => vec![('d', "del", theme.danger)],
     }
 }
 
 /// Render the action shortcuts distributed evenly across the full card
 /// width. Each shortcut's key letter is bold and colored by the action's
 /// meaning (see [`action_items`]) so it stands out clearly against the
-/// muted description text that follows it.
+/// muted description text that follows it. The key letter is located
+/// wherever it first occurs in the label (case-insensitive) rather than
+/// assumed to be the first character, since shortcuts like `h` for "shell"
+/// are chosen from the middle of the word.
 fn render_actions_bar(f: &mut Frame, theme: Theme, status: SandboxStatus, area: Rect) {
     let items = action_items(&theme, status);
     if items.is_empty() {
@@ -388,14 +394,26 @@ fn render_actions_bar(f: &mut Frame, theme: Theme, status: SandboxStatus, area: 
         .constraints(constraints)
         .split(area);
 
-    for (i, (key, rest, color)) in items.iter().enumerate() {
-        let line = Line::from(vec![
-            Span::styled(
-                *key,
-                Style::default().fg(*color).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(*rest, theme.muted()),
-        ]);
+    for (i, (key, label, color)) in items.iter().enumerate() {
+        let key_style = Style::default().fg(*color).add_modifier(Modifier::BOLD);
+        let key_idx = label
+            .to_lowercase()
+            .find(key.to_ascii_lowercase())
+            .unwrap_or(0);
+        let before = &label[..key_idx];
+        let key_char = &label[key_idx..key_idx + key.len_utf8()];
+        let after = &label[key_idx + key.len_utf8()..];
+
+        let mut spans = Vec::with_capacity(3);
+        if !before.is_empty() {
+            spans.push(Span::styled(before, theme.muted()));
+        }
+        spans.push(Span::styled(key_char, key_style));
+        if !after.is_empty() {
+            spans.push(Span::styled(after, theme.muted()));
+        }
+
+        let line = Line::from(spans);
         f.render_widget(Paragraph::new(line).alignment(Alignment::Center), cols[i]);
     }
 }

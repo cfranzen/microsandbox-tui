@@ -21,6 +21,12 @@ use anyhow::{bail, Context, Result};
 /// `argv[3]` is the command line to run, instead of starting the TUI.
 pub const EXEC_TERMINAL_FLAG: &str = "--exec-terminal";
 
+/// Hidden CLI flag recognised by `main` to enter shell-session mode: when
+/// `argv[1] == SHELL_TERMINAL_FLAG`, `argv[2]` is the sandbox name, instead
+/// of starting the TUI. Unlike [`EXEC_TERMINAL_FLAG`], no command is passed
+/// — the guest's configured shell is attached to directly.
+pub const SHELL_TERMINAL_FLAG: &str = "--shell-terminal";
+
 /// Open a new terminal window on the host that connects to `sandbox_name`
 /// and runs `sh -c <command>` there, with a real PTY and full stdio
 /// forwarding.
@@ -30,24 +36,39 @@ pub const EXEC_TERMINAL_FLAG: &str = "--exec-terminal";
 /// would at a shell prompt; it's passed as a single argument, so no host-side
 /// shell quoting is needed for the sandbox side.
 pub fn open_exec_terminal(sandbox_name: &str, command: &str) -> Result<()> {
-    let exe = env::current_exe().context("locate current executable")?;
     let self_args = [
         EXEC_TERMINAL_FLAG.to_owned(),
         sandbox_name.to_owned(),
         command.to_owned(),
     ];
+    open_terminal(&self_args)
+}
+
+/// Open a new terminal window on the host that connects to `sandbox_name`
+/// and attaches directly to its configured shell (set via `--shell` at
+/// creation time, defaulting to `/bin/sh`), with a real PTY and full stdio
+/// forwarding — no command is run first.
+pub fn open_shell_terminal(sandbox_name: &str) -> Result<()> {
+    let self_args = [SHELL_TERMINAL_FLAG.to_owned(), sandbox_name.to_owned()];
+    open_terminal(&self_args)
+}
+
+/// Re-exec this same binary with `self_args` in a new host terminal window,
+/// trying each platform's terminal-launch mechanism in turn.
+fn open_terminal(self_args: &[String]) -> Result<()> {
+    let exe = env::current_exe().context("locate current executable")?;
 
     #[cfg(target_os = "windows")]
     {
-        spawn_windows_terminal(&exe, &self_args)
+        spawn_windows_terminal(&exe, self_args)
     }
     #[cfg(target_os = "macos")]
     {
-        spawn_macos_terminal(&exe, &self_args)
+        spawn_macos_terminal(&exe, self_args)
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        spawn_linux_terminal(&exe, &self_args)
+        spawn_linux_terminal(&exe, self_args)
     }
 }
 
