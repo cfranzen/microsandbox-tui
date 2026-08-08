@@ -33,6 +33,24 @@ fn point_in_rect(x: u16, y: u16, rect: Rect) -> bool {
     rect.x <= x && x < rect.x + rect.width && rect.y <= y && y < rect.y + rect.height
 }
 
+fn move_network_rule(app: &mut App, delta: isize) {
+    let selected = app.create_dialog.network_rules_selected;
+    let len = app.create_dialog.network_rules.len();
+    if len < 2 {
+        return;
+    }
+    let target = if delta < 0 {
+        selected.saturating_sub(1)
+    } else {
+        (selected + 1).min(len - 1)
+    };
+    if target == selected {
+        return;
+    }
+    app.create_dialog.network_rules.swap(selected, target);
+    app.create_dialog.network_rules_selected = target;
+}
+
 pub(crate) fn handle_event(app: &mut App, event: Event) {
     let key = match event {
         Event::Key(key) => key,
@@ -310,6 +328,14 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                     open_list_edit_dialog(app, list);
                     return;
                 }
+                KeyCode::Char('+') if list == ListField::NetworkRules => {
+                    move_network_rule(app, -1);
+                    return;
+                }
+                KeyCode::Char('-') if list == ListField::NetworkRules => {
+                    move_network_rule(app, 1);
+                    return;
+                }
                 _ => {}
             }
         }
@@ -322,16 +348,50 @@ fn handle_dialog_key(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
         }
         KeyCode::Tab | KeyCode::Down => app.create_dialog.next_field(),
         KeyCode::BackTab | KeyCode::Up => app.create_dialog.prev_field(),
-        KeyCode::Left => {
-            let prev = app.create_dialog.tab.prev();
-            app.create_dialog.switch_tab(prev);
-        }
-        KeyCode::Right => {
-            let next = app.create_dialog.tab.next();
-            app.create_dialog.switch_tab(next);
-        }
         KeyCode::Char(' ') if app.create_dialog.is_toggle_field() => {
-            app.create_dialog.disable_network = !app.create_dialog.disable_network;
+            match (app.create_dialog.tab, app.create_dialog.field) {
+                (DialogTab::Network, 0) => {
+                    app.create_dialog.disable_network = !app.create_dialog.disable_network;
+                }
+                (DialogTab::Network, 4) => {
+                    app.create_dialog.dns_rebind_protection =
+                        !app.create_dialog.dns_rebind_protection;
+                }
+                (DialogTab::Security, 1) => {
+                    app.create_dialog.tls_enabled = !app.create_dialog.tls_enabled;
+                }
+                (DialogTab::Security, 4) => {
+                    app.create_dialog.tls_verify_upstream = !app.create_dialog.tls_verify_upstream;
+                }
+                (DialogTab::Security, 5) => {
+                    app.create_dialog.tls_block_quic = !app.create_dialog.tls_block_quic;
+                }
+                _ => {}
+            }
+            app.create_dialog.error = None;
+        }
+        KeyCode::Left | KeyCode::Right if !app.create_dialog.is_create_focused() => {
+            match (app.create_dialog.tab, app.create_dialog.field) {
+                (DialogTab::Network, 1) => {
+                    app.create_dialog.default_ingress_action =
+                        app.create_dialog.default_ingress_action.cycle();
+                }
+                (DialogTab::Network, 2) => {
+                    app.create_dialog.default_egress_action =
+                        app.create_dialog.default_egress_action.cycle();
+                }
+                (DialogTab::Security, 6) => {
+                    app.create_dialog.violation_action = app.create_dialog.violation_action.cycle();
+                }
+                _ => {
+                    let tab = if code == KeyCode::Left {
+                        app.create_dialog.tab.prev()
+                    } else {
+                        app.create_dialog.tab.next()
+                    };
+                    app.create_dialog.switch_tab(tab);
+                }
+            }
             app.create_dialog.error = None;
         }
         KeyCode::Enter => {

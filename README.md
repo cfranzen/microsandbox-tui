@@ -121,14 +121,22 @@ active, so it never interferes with those modal flows.
 | Key | Action |
 |-----|--------|
 | `Tab` / `↑` / `↓` | Move between fields |
-| `◄` / `►` | Switch between Basic / Guest OS / Network / Secrets tabs |
+| `◄` / `►` | Switch between Basic / Guest OS / Network / Security tabs |
 | `Space` | Toggle boolean fields (e.g. Disable Network, injection toggles) |
 | `Ctrl-F` | Open directory picker (Workdir field) |
-| `↑` / `↓` | Move selection within a focused inline list (Env Vars, Mounts, Ports, Net Rules, Secrets) |
-| `a` | Add a new entry to the focused inline list (opens an Add popup) |
+| `Enter` on a list | Enter list edit mode; `Enter` again edits selected row |
+| `↑` / `↓` | Navigate fields normally; in list edit mode, move selected list row |
+| `a` | Add a new entry to the focused inline list (in list edit mode) |
 | `d` / `Delete` | Delete the selected entry from the focused inline list |
-| `Enter` | Create sandbox, or (when a list is focused) open its Add popup, or (inside an Add popup) advance to the next field / submit on the last field |
-| `Esc` | Close dialog / cancel the open Add popup |
+| `+` / `-` | Reorder Network Rules in list edit mode |
+| `Enter` | Create sandbox, enter list edit mode, or advance/submit inside popups |
+| `Esc` | Close only the top-most modal, or exit list edit mode |
+
+Create-dialog required fields are marked with `*`: Name, Image, CPUs, Memory, Shell.
+
+Network tab also exposes No Net, default ingress/egress action, DNS nameservers, DNS timeout, and DNS rebinding protection. Net Rules are ordered first-match-wins.
+
+Security tab includes User, TLS interception toggles/settings, sandbox-wide secret violation action / passthrough host lists, and Secrets.
 
 ### Network Rules add dialog
 
