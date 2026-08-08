@@ -475,9 +475,9 @@ impl VolumesView {
     }
 }
 
-/// The command line prefilled in the "Exec" dialog: opens a plain shell in
-/// the sandbox by default.
-pub const DEFAULT_EXEC_COMMAND: &str = "sh";
+/// The command line prefilled in the "Exec" dialog: empty by default,
+/// requiring the user to type a command.
+pub const DEFAULT_EXEC_COMMAND: &str = "";
 
 /// State of the "Exec" dialog: prompts for a command line to run inside a
 /// running sandbox, then opens a new terminal window on the host that runs
@@ -494,8 +494,8 @@ pub struct ExecDialog {
 }
 
 impl ExecDialog {
-    /// Open the dialog for the given sandbox, prefilled with the default
-    /// shell command.
+    /// Open the dialog for the given sandbox, prefilled with
+    /// [`DEFAULT_EXEC_COMMAND`] (empty).
     pub fn open(sandbox_name: impl Into<String>) -> Self {
         Self {
             visible: true,
