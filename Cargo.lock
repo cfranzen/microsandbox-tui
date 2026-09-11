@@ -1053,6 +1053,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dirs"
+version = "7.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d57d423b3c82e89b9a24ca3091fee61f456a26edbd28d26c65906f4bc1dcd8f"
+dependencies = [
+ "dirs-sys",
+]
+
+[[package]]
 name = "dirs-sys"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2373,7 +2382,7 @@ dependencies = [
  "chrono",
  "ciborium",
  "crossterm",
- "dirs",
+ "dirs 6.0.0",
  "docker_credential",
  "flate2",
  "futures",
@@ -2516,7 +2525,7 @@ dependencies = [
  "bytes",
  "core-foundation 0.9.4",
  "crossbeam-queue",
- "dirs",
+ "dirs 6.0.0",
  "futures",
  "hickory-net",
  "hickory-proto",
@@ -2607,7 +2616,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "crossterm",
- "dirs",
+ "dirs 7.0.0",
  "futures",
  "humantime",
  "microsandbox",
@@ -2641,7 +2650,7 @@ version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc149361bf7eea1258bdf0e2a8b40e90e21e40a8db62217fd36a361ce025a331"
 dependencies = [
- "dirs",
+ "dirs 6.0.0",
  "libc",
  "reflink-copy",
  "scopeguard",
