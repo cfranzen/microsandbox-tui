@@ -2388,7 +2388,7 @@ dependencies = [
  "microsandbox-network",
  "microsandbox-protocol",
  "microsandbox-runtime",
- "microsandbox-types",
+ "microsandbox-types 0.6.8",
  "microsandbox-utils",
  "nix 0.31.3",
  "notify",
@@ -2526,7 +2526,7 @@ dependencies = [
  "libc",
  "lru",
  "microsandbox-protocol",
- "microsandbox-types",
+ "microsandbox-types 0.6.8",
  "microsandbox-utils",
  "msb_krun",
  "msb_krun_utils",
@@ -2559,7 +2559,7 @@ checksum = "6044aa582f1b2cc8c17144410d146efd161a00c5d113164d0f63ff16943be873"
 dependencies = [
  "chrono",
  "ciborium",
- "microsandbox-types",
+ "microsandbox-types 0.6.8",
  "serde",
  "serde_bytes",
  "strum 0.28.0",
@@ -2584,7 +2584,7 @@ dependencies = [
  "microsandbox-metrics",
  "microsandbox-network",
  "microsandbox-protocol",
- "microsandbox-types",
+ "microsandbox-types 0.6.8",
  "microsandbox-utils",
  "msb_krun",
  "nix 0.31.3",
@@ -2612,7 +2612,7 @@ dependencies = [
  "humantime",
  "microsandbox",
  "microsandbox-network",
- "microsandbox-types",
+ "microsandbox-types 0.7.2",
  "ratatui",
  "serde",
  "serde_json",
@@ -2633,6 +2633,35 @@ dependencies = [
  "sha2 0.11.0",
  "thiserror 2.0.19",
  "zeroize",
+]
+
+[[package]]
+name = "microsandbox-types"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f705cfd6b163fc5b00987c6cf6143b5ceed311b097e68926822b2d6daa4cfee"
+dependencies = [
+ "chrono",
+ "hex",
+ "ipnetwork",
+ "microsandbox-types-macros",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror 2.0.19",
+ "typed-path",
+ "zeroize",
+]
+
+[[package]]
+name = "microsandbox-types-macros"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47e45acf1d8548270f290465c376ce48cf72b231cabd90e91682e0df04f73e03"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
 ]
 
 [[package]]
